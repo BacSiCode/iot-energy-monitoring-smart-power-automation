@@ -1,0 +1,26 @@
+# ==================================================
+# IoT Energy Monitoring & Smart Power Automation
+# .gitignore
+# ==================================================
+
+.env
+.env.local
+node_modules/
+.pio/
+.pioenvs/
+.piolibdeps/
+firmware/esp32/.pio/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+middleware/mosquitto/data/
+middleware/mosquitto/log/
+build/
+dist/
+*.bin
+*.elf
+*.hex
+*.map
+*.log
+logs/
