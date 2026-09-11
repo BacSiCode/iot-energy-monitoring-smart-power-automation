@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "author": "IoT Energy Monitoring Team",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-esp32-devkit-v1",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-pir-motion-sensor",
+      "id": "pir",
+      "top": -80,
+      "left": 300,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "currentInput",
+      "top": 100,
+      "left": 300,
+      "attrs": { "value": "35" }
+    },
+    {
+      "type": "wokwi-slide-switch",
+      "id": "storeState",
+      "top": 270,
+      "left": 300,
+      "attrs": { "value": "0" }
+    },
+    {
+      "type": "wokwi-relay-module",
+      "id": "relay",
+      "top": 0,
+      "left": 520,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "loadLed",
+      "top": 160,
+      "left": 690,
+      "attrs": { "color": "yellow", "label": "Simulated load" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "loadResistor",
+      "top": 160,
+      "left": 610,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": 290,
+      "left": 520,
+      "attrs": { "volume": "0.2" }
+    }
+  ],
+  "connections": [
+    [ "esp:3V3", "pir:VCC", "red", [ "h80" ] ],
+    [ "esp:GND.1", "pir:GND", "black", [ "h-20" ] ],
+    [ "esp:D27", "pir:OUT", "green", [ "h120" ] ],
+    [ "esp:3V3", "currentInput:VCC", "red", [ "h180" ] ],
+    [ "esp:GND.1", "currentInput:GND", "black", [ "h40" ] ],
+    [ "esp:D34", "currentInput:SIG", "orange", [ "h220" ] ],
+    [ "esp:3V3", "storeState:1", "red", [ "h250" ] ],
+    [ "esp:GND.1", "storeState:2", "black", [ "h70" ] ],
+    [ "esp:D26", "storeState:COM", "blue", [ "h300" ] ],
+    [ "esp:5V", "relay:VCC", "red", [ "h350" ] ],
+    [ "esp:GND.2", "relay:GND", "black", [ "h-80" ] ],
+    [ "esp:D25", "relay:IN", "purple", [ "h400" ] ],
+    [ "esp:3V3", "relay:COM", "red", [ "h460" ] ],
+    [ "relay:NO", "loadResistor:1", "yellow", [ "h80" ] ],
+    [ "loadResistor:2", "loadLed:A", "yellow", [ "h50" ] ],
+    [ "loadLed:C", "esp:GND.2", "black", [ "h-120" ] ],
+    [ "esp:D33", "buzzer:1", "purple", [ "h520" ] ],
+    [ "esp:GND.2", "buzzer:2", "black", [ "h-80" ] ]
+  ],
+  "dependencies": {}
+}
