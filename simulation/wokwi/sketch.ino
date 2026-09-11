@@ -4,7 +4,8 @@ const int STORE_STATE_PIN = 26;
 const int RELAY_PIN = 25;
 const int BUZZER_PIN = 33;
 
-const int CURRENT_THRESHOLD = 3000;
+// The Wokwi potentiometer returns an ADC value from 0 to 1023.
+const int CURRENT_THRESHOLD = 700;
 const unsigned long STATUS_INTERVAL_MS = 1000;
 
 unsigned long lastStatusAt = 0;
@@ -12,6 +13,7 @@ bool relayOn = true;
 
 void setRelay(bool enabled) {
   relayOn = enabled;
+  // The relay is configured as PNP: HIGH connects COM to NO (load ON).
   digitalWrite(RELAY_PIN, enabled ? HIGH : LOW);
 }
 
@@ -31,6 +33,8 @@ void printStatus(bool storeClosed, bool presenceDetected, int currentValue,
 
 void setup() {
   Serial.begin(115200);
+  // Controls in the diagram: switch=store state, PIR=presence,
+  // potentiometer=current, relay/load=output, buzzer=warning.
   pinMode(PIR_PIN, INPUT);
   pinMode(STORE_STATE_PIN, INPUT);
   pinMode(RELAY_PIN, OUTPUT);
@@ -38,7 +42,8 @@ void setup() {
   setRelay(true);
 
   Serial.println("Topic 55 Week 2 Wokwi simulation");
-  Serial.println("Set switch CLOSED, trigger PIR, and turn the potentiometer to test.");
+  Serial.println("Controls: switch=CLOSED/OPEN, PIR=presence, potentiometer=current");
+  Serial.println("Relay/load follows the state; buzzer sounds above current threshold");
 }
 
 void loop() {
