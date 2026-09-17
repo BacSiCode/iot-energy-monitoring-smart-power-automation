@@ -2,62 +2,89 @@
   "version": 1,
   "author": "IoT Energy Monitoring Team",
   "editor": "wokwi",
+  "serialMonitor": {
+    "display": "always",
+    "collapse": false
+  },
   "parts": [
     {
       "type": "wokwi-esp32-devkit-v1",
       "id": "esp",
       "top": 0,
       "left": 0,
-      "attrs": {}
+      "attrs": {
+        "label": "ESP32 DevKit V1 - Controller"
+      }
     },
     {
       "type": "wokwi-pir-motion-sensor",
       "id": "pir",
       "top": -80,
       "left": 300,
-      "attrs": {}
+      "attrs": {
+        "label": "PIR HC-SR501 - Presence Sensor"
+      }
     },
     {
       "type": "wokwi-potentiometer",
       "id": "currentInput",
       "top": 100,
       "left": 300,
-      "attrs": { "value": "35", "label": "CURRENT INPUT (0-1023)" }
+      "attrs": {
+        "value": "35",
+        "label": "Current Sensor Simulation"
+      }
     },
     {
       "type": "wokwi-slide-switch",
       "id": "storeState",
       "top": 270,
       "left": 300,
-      "attrs": { "value": "1", "bounce": "0", "label": "STORE: CLOSED / OPEN" }
+      "attrs": {
+        "value": "1",
+        "bounce": "0",
+        "label": "Store OPEN / CLOSED"
+      }
     },
     {
       "type": "wokwi-relay-module",
       "id": "relay",
       "top": 0,
       "left": 520,
-      "attrs": { "transistor": "pnp", "label": "RELAY / LOAD CONTROL" }
+      "attrs": {
+        "transistor": "pnp",
+        "label": "Relay Module - Load Control"
+      }
     },
     {
       "type": "wokwi-led",
       "id": "loadLed",
       "top": 160,
       "left": 690,
-      "attrs": { "color": "yellow", "label": "LOAD LED" }
+      "attrs": {
+        "color": "yellow",
+        "label": "LED - Simulated Load"
+      }
     },
     {
       "type": "wokwi-resistor",
       "id": "loadResistor",
       "top": 160,
       "left": 610,
-      "attrs": { "value": "220" }
+      "attrs": {
+        "value": "220",
+        "label": "220 Ohm - LED Protection"
+      }
     },
     {
       "type": "wokwi-buzzer",
       "id": "buzzer",
       "top": 290,
       "left": 520,
-      "attrs": { "volume": "0.2", "label": "ABNORMAL CURRENT" }
+      "attrs": {
+        "volume": "0.2",
+        "label": "Buzzer - Abnormal Current Alert"
+      }
     }
   ],
   "connections": [

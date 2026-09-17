@@ -1,102 +1,176 @@
-# Week 2 - Mô phỏng Wokwi
+﻿# Week 2 - Mô phỏng Wokwi
 
-## 1. Mục đích
+## Trạng thái kiểm tra
 
-Mô phỏng này triển khai phần đầu của Topic 55: theo dõi dòng điện mô phỏng
-của tải và tự động tắt tải sau giờ đóng cửa khi không phát hiện người.
+Hiện tại, dự án Week 2 đã vượt qua kiểm tra cấu trúc:
 
-Mạch chạy trên ESP32 mô phỏng trong Wokwi. Relay chỉ điều khiển LED đại diện
-cho tải mô phỏng; không kết nối hoặc mô tả tải điện thực tế.
+- JSON của Wokwi hợp lệ
+- các hằng số và chuỗi cần thiết trong sketch đã có mặt
+- chưa thêm Wi-Fi, MQTT, cloud hoặc kiến trúc của các tuần sau
 
-Week 2 chưa triển khai MQTT, Mosquitto, Node-RED, dashboard, Telegram hay
-phần cứng thật.
+Tuy nhiên, cần thực hiện xác minh runtime trong Wokwi để khẳng định các kịch bản T01-T06 đã hoạt động đúng như mong đợi. Tài liệu này không khẳng định rằng các bài kiểm tra đã được chạy thành công trong môi trường Wokwi thực tế.
 
-## 2. Linh kiện
+## 1. Mục tiêu Week 2
 
-- ESP32 DevKit v1: bộ điều khiển trung tâm.
-- PIR: mô phỏng phát hiện người.
-- Potentiometer: tạo giá trị ADC đại diện cho dòng điện.
-- Slide switch: chọn trạng thái cửa hàng `CLOSED` hoặc `OPEN`.
-- Relay module: bật hoặc tắt tải mô phỏng.
-- LED vàng và điện trở: đại diện cho tải mô phỏng.
-- Buzzer: cảnh báo khi dòng điện vượt ngưỡng.
+Week 2 tập trung vào mô phỏng tầng cảm biến và tầng thiết bị của đề tài Smart Retail. Mục tiêu là kiểm tra logic điều khiển cục bộ của ESP32 trong trường hợp cửa hàng đóng cửa, không có người và tải đang bật.
+
+Mô phỏng này giúp sinh viên hiểu rõ:
+
+- trạng thái cửa hàng mở/đóng
+- phát hiện người bằng PIR
+- tín hiệu mô phỏng của cảm biến dòng điện
+- điều khiển relay
+- chuông báo khi dòng điện bất thường
+- luật tắt tải tự động
+
+## 2. Các thành phần trong Wokwi
+
+- ESP32 DevKit V1
+- PIR HC-SR501
+- Potentiometer để mô phỏng tín hiệu analog của cảm biến dòng điện
+- Slide switch để chọn trạng thái cửa hàng OPEN/CLOSED
+- Relay module để điều khiển tải mô phỏng
+- LED để mô phỏng tải điện
+- Điện trở 220 ohm để bảo vệ LED
+- Buzzer để cảnh báo dòng điện bất thường
 
 ## 3. GPIO mapping
 
-| Tín hiệu | GPIO | Chân linh kiện Wokwi |
-| --- | ---: | --- |
-| Phát hiện người | 27 | PIR `OUT` |
-| Dòng điện mô phỏng | 34 | Potentiometer `SIG` |
-| Trạng thái cửa hàng | 26 | Slide switch chân `2` (COM) |
-| Điều khiển relay | 25 | Relay `IN` |
-| Buzzer cảnh báo | 33 | Buzzer chân `2` (dương) |
+| Tín hiệu | GPIO | Kết nối trong Wokwi |
+|---|---:|---|
+| PIR presence | 27 | PIR OUT |
+| Tín hiệu dòng điện mô phỏng | 34 | Potentiometer SIG |
+| Trạng thái cửa hàng | 26 | Slide switch chân 2 |
+| Điều khiển relay | 25 | Relay IN |
+| Buzzer cảnh báo | 33 | Buzzer chân dương |
 
-Slide switch Wokwi có ba chân số `1`, `2`, `3`; chân `2` là chân COM. Chân
-`1` nối GND, chân `3` nối 3V3, còn chân `2` nối GPIO 26. Vì vậy trạng thái
-đọc vào không bị floating: vị trí nối chân `3` là `CLOSED` (HIGH), vị trí nối
-chân `1` là `OPEN` (LOW). PIR và potentiometer cũng được nối rõ ràng với
-nguồn và GND.
+## 4. Tổng hợp dây kết nối
 
-Potentiometer có ba chân `GND`, `SIG`, `VCC`: `VCC` nối 3V3, `GND` nối GND,
-`SIG` nối GPIO 34. Giá trị đọc nằm trong khoảng ADC `0..1023`.
+- ESP32 3V3 -> PIR VCC
+- ESP32 GND -> PIR GND
+- ESP32 GPIO27 -> PIR OUT
+- ESP32 3V3 -> potentiometer VCC
+- ESP32 GND -> potentiometer GND
+- ESP32 GPIO34 -> potentiometer SIG
+- ESP32 GND -> slide switch chân 1
+- ESP32 GPIO26 -> slide switch chân 2
+- ESP32 3V3 -> slide switch chân 3
+- ESP32 5V -> relay VCC
+- ESP32 GND -> relay GND
+- ESP32 GPIO25 -> relay IN
+- Relay COM -> ESP32 3V3
+- Relay NO -> điện trở 220Ω -> chân anode LED
+- Chân cathode LED -> ESP32 GND
+- ESP32 GPIO33 -> buzzer chân dương
+- Buzzer chân âm -> ESP32 GND
 
-## 4. Cách chạy
+## 5. Luật điều khiển
 
-1. Mở [diagram.json](diagram.json) bằng Wokwi for VS Code hoặc import thư mục
-  này vào Wokwi trên trình duyệt.
-2. Chạy mô phỏng và mở Serial Monitor ở tốc độ `115200` baud.
-3. Thay đổi slide switch, kích hoạt PIR và xoay potentiometer để kiểm thử.
+### Luật chính
 
-Serial Monitor in trạng thái cửa hàng, hiện diện, giá trị ADC, relay và cảnh
-báo dòng điện mỗi giây.
+- CLOSED + NO PRESENCE + LOAD ON -> RELAY OFF
 
-Sketch nằm trong [sketch.ino](sketch.ino). Ngưỡng cảnh báo hiện tại là
-`CURRENT_THRESHOLD = 700` trên thang ADC Wokwi `0..1023`.
+### Luật bảo vệ
 
-Relay dùng chế độ `pnp`: `IN=HIGH` nối `COM` với `NO`, làm LED tải sáng;
-`IN=LOW` ngắt đường tới `NO`, làm LED tải tắt. `COM` nối 3V3, `NO` đi qua
-điện trở và LED xuống GND. Buzzer nối GPIO 33 vào chân `2` (dương) và GND
-vào chân `1` (âm).
+- CLOSED + PRESENCE -> không tự động tắt tải
 
-## 5. Các scenario kiểm thử
+### Dòng điện bất thường
 
-### Scenario 1: Tự động tắt tải
+- currentValue > CURRENT_THRESHOLD -> abnormal_current=YES
+- kích hoạt buzzer cảnh báo
 
-Thiết lập:
+### Giới hạn tín hiệu mô phỏng
 
-- Slide switch ở trạng thái `CLOSED`.
-- PIR không phát hiện người.
+Potentiometer chỉ được sử dụng để mô phỏng tín hiệu analog của cảm biến dòng điện trong Wokwi. Giá trị này dùng để kiểm thử logic ngưỡng và không đại diện trực tiếp cho đơn vị Ampere.
 
-Kết quả mong đợi:
+## 6. Các kịch bản kiểm thử
 
-- Relay chuyển sang `OFF`.
-- LED tải mô phỏng tắt.
-- Serial Monitor in sự kiện `AUTO_SHUTDOWN`.
+### T01 - Hoạt động bình thường
 
-### Scenario 2: Có người thì không tự tắt
+- Cửa hàng mở
+- Không có người
+- Dòng điện thấp hơn ngưỡng
+- Kỳ vọng: relay ON, LED ON, buzzer OFF
 
-Thiết lập slide switch ở `CLOSED` và kích hoạt PIR.
+### T02 - Tắt tự động
 
-Kết quả mong đợi: relay vẫn `ON` hoặc được bật lại, LED tải vẫn sáng trong
-thời gian phát hiện có người.
+- Cửa hàng mở, sau đó chuyển sang CLOSED
+- Không có người
+- Relay đang ON
+- Kỳ vọng: xuất hiện AUTO_SHUTDOWN, relay OFF, LED OFF
 
-### Scenario 3: Dòng điện vượt ngưỡng
+### T03 - Bảo vệ khi có người
 
-Xoay potentiometer để giá trị ADC lớn hơn `700`.
+- Cửa hàng CLOSED
+- PIR phát hiện người
+- Kỳ vọng: không tự động tắt tải, relay vẫn ON
 
-Kết quả mong đợi:
+### T04 - Dòng điện bất thường
 
-- Serial Monitor hiển thị `abnormal_current=YES`.
-- Buzzer phát âm cảnh báo.
+- Tăng giá trị potentiometer vượt ngưỡng
+- Kỳ vọng: abnormal_current=YES và buzzer kích hoạt
+- Khi giảm xuống dưới ngưỡng, buzzer tắt
 
-## 6. Giới hạn của Week 2
+### T05 - Khôi phục sau khi có người
 
-- Potentiometer chỉ tạo giá trị ADC, chưa phải phép đo dòng điện đã hiệu
-  chuẩn.
-- Thời gian đóng cửa được mô phỏng bằng switch thủ công; chưa có đồng hồ hay
-  lịch làm việc.
-- Relay chỉ đóng/ngắt LED mô phỏng.
-- Chưa có Wi-Fi, MQTT, lưu trữ dữ liệu, điều khiển từ xa, dashboard hoặc
-  triển khai phần cứng thật.
-- Logic hiện tại là logic cục bộ đơn giản, chưa phải cơ chế bảo vệ điện hoặc
-  hệ thống an toàn cho môi trường thực tế.
+- Cửa hàng CLOSED
+- Relay đã OFF do tự động tắt
+- Kích hoạt PIR
+- Kỳ vọng: LOAD_RESTORE và relay bật lại
+
+### T06 - Mở cửa khôi phục
+
+- Cửa hàng CLOSED
+- Relay OFF
+- Chuyển cửa hàng sang OPEN
+- Kỳ vọng: relay ON, LED ON
+
+## 7. Serial Monitor
+
+Serial Monitor được cấu hình để hiển thị trạng thái mỗi khoảng thời gian khoảng 1 giây. Nội dung hiển thị gồm:
+
+- store
+- presence
+- current
+- relay
+- abnormal_current
+
+Ví dụ:
+
+- store=OPEN presence=NO current=350 relay=ON abnormal_current=NO
+- store=CLOSED presence=NO current=350 relay=OFF abnormal_current=NO
+- store=CLOSED presence=YES current=350 relay=ON abnormal_current=NO
+
+## 8. Cách chạy mô phỏng
+
+1. Mở thư mục [simulation/wokwi](simulation/wokwi).
+2. Mở file [simulation/wokwi/diagram.json](simulation/wokwi/diagram.json) trong Wokwi.
+3. Mở Serial Monitor ở tốc độ 115200.
+4. Đặt cửa hàng ở trạng thái OPEN.
+5. Kiểm tra relay và LED.
+6. Thực hiện lần lượt các kịch bản T01-T06.
+
+## 9. Giới hạn của Week 2
+
+- Potentiometer không phải cảm biến dòng điện thực tế.
+- Tín hiệu ADC chỉ dùng để kiểm thử logic ngưỡng.
+- LED là tải mô phỏng, không phải tải điện 220V thực tế.
+- Không có Wi-Fi, MQTT, dashboard, Node-RED hoặc Telegram trong Week 2.
+- Không có kiến trúc 4 lớp hoàn chỉnh ở các tuần sau.
+
+## 10. Yêu cầu xác minh thực tế
+
+Các bài kiểm tra cần thực hiện trong Wokwi thực tế:
+
+- [ ] T01: cửa hàng mở, không có người, dòng điện bình thường
+- [ ] T02: cửa hàng đóng, không có người, tự động tắt
+- [ ] T03: cửa hàng đóng, có người, không tự ngắt sai
+- [ ] T04: dòng điện vượt ngưỡng, buzzer cảnh báo
+- [ ] T05: phục hồi sau khi có người
+- [ ] T06: mở cửa lại, relay bật lại
+
+Hiện tại, chưa có bằng chứng runtime Wokwi để khẳng định các mục này đã vượt qua. Người dùng cần thực hiện trong môi trường Wokwi để xác nhận cuối cùng.
+
+## 11. Lưu ý an toàn
+
+Mô phỏng này chỉ là mô phỏng phần cứng ở cấp độ low-voltage và không được mô tả là điều khiển điện AC 220V thực tế. Nếu triển khai vật lý sau này, phải dùng phương án cách ly phù hợp và tải mô phỏng an toàn.
