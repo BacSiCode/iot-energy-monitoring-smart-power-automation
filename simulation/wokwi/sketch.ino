@@ -1,3 +1,5 @@
+#include <Arduino.h>
+
 const int PIR_PIN = 27;
 const int CURRENT_PIN = 34;
 const int STORE_STATE_PIN = 26;

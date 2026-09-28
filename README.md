@@ -1,154 +1,121 @@
-# Dự án IoT #55 - Giám sát điện năng và tự động hóa nguồn
+# IoT 55 - Giám sát điện năng và tự tắt thiết bị
 
-## 1. Tổng quan
+Project mô phỏng và triển khai hệ thống IoT 4 lớp cho cửa hàng: đọc tín hiệu hiện diện, tín hiệu dòng điện mô phỏng, trạng thái cửa hàng; điều khiển relay; gửi dữ liệu qua Wi-Fi/MQTT; xử lý rule bằng Node-RED; và hiển thị dashboard điều khiển từ xa.
 
-### Vấn đề thực tế
+## Kiến trúc
 
-Sau giờ đóng cửa, cửa hàng có thể để các tải điện vẫn hoạt động dù không còn người trong không gian bán hàng. Điều này dẫn đến lãng phí điện năng, khó kiểm soát trạng thái thiết bị và tăng nguy cơ hao phí không cần thiết.
+```mermaid
+flowchart LR
+  PIR[PIR] --> ESP[ESP32 firmware]
+  ADC[Potentiometer / current_signal] --> ESP
+  SW[Store switch] --> ESP
+  ESP -->|Wi-Fi MQTT telemetry| BROKER[Mosquitto]
+  BROKER --> NR[Node-RED validation, FSM, rules, scheduler]
+  NR --> DASH[Dashboard :8080]
+  DASH --> NR
+  NR -->|MQTT command| ESP
+  ESP --> RELAY[Relay + LED load]
+  ESP --> BUZZER[Buzzer]
+```
 
-### Mục tiêu
+## Trạng thái hiện thực
 
-Xây dựng hệ thống IoT đơn giản, dễ demo trong lớp học, có khả năng:
+- Wokwi: mạch và logic local đã có trong `simulation/wokwi`.
+- Firmware: PlatformIO build được cho ESP32; có Wi-Fi, MQTT, LWT, reconnect, telemetry và validate command.
+- Middleware: flow Node-RED có validation, state machine, rule auto-shutdown, abnormal current, scheduler và HTTP API.
+- Dashboard: giao diện nhẹ, đọc `/api/state` và gửi command tới `/api/command`.
+- Docker: có Compose cho Mosquitto, Node-RED và Nginx dashboard.
+- E2E thật với thiết bị/Wokwi kết nối broker local: **NOT VERIFIED** trong môi trường hiện tại vì máy chưa có Docker và Wokwi online không được xác nhận kết nối tới broker local.
 
-- phát hiện trạng thái cửa hàng mở/đóng
-- phát hiện sự hiện diện của người trong cửa hàng
-- mô phỏng tín hiệu dòng điện
-- tắt tải tự động khi cửa hàng đóng và không có người
-- cảnh báo khi tín hiệu dòng điện vượt ngưỡng
-- hiển thị trạng thái trên Serial Monitor trong Wokwi
+## Topic MQTT
 
-### Giải pháp
+Namespace là `iot55/device01/`.
 
-Trong Week 2, hệ thống được triển khai ở mức mô phỏng Wokwi để kiểm tra logic cục bộ của ESP32. Phần này tập trung vào cảm biến, relay, đèn LED mô phỏng tải, buzzer và luật tự động hóa ở tầng thiết bị.
-
-### Thành phần hệ thống
-
-- ESP32 DevKit V1
-- PIR HC-SR501
-- Potentiometer để mô phỏng tín hiệu analog của cảm biến dòng điện
-- Slide switch để mô phỏng trạng thái cửa hàng mở/đóng
-- Relay module để điều khiển tải mô phỏng
-- LED 220Ω để mô phỏng tải điện
-- Buzzer để cảnh báo dòng điện bất thường
-
-## 2. Kiến trúc 4 lớp
-
-| Lớp | Mô tả |
-|---|---|
-| Lớp 1 | Cảm biến và thiết bị: PIR, relay, LED, buzzer, switch, ESP32 |
-| Lớp 2 | Kết nối thiết bị và logic cục bộ trên ESP32 |
-| Lớp 3 | Middleware, MQTT, Node-RED, quy trình xử lý dữ liệu trong các tuần sau |
-| Lớp 4 | Ứng dụng, dashboard, giám sát và điều khiển từ xa trong các tuần sau |
-
-Lưu ý: Week 2 chỉ mô phỏng Layer 1 và phần logic xử lý local trên thiết bị. Các lớp 3 và 4 chưa được triển khai.
-
-## 3. Cấu trúc repository
-
-| Thư mục | Mô tả |
-|---|---|
-| docs/ | Tài liệu yêu cầu, kiến trúc, thiết kế, lộ trình |
-| simulation/wokwi/ | Mô phỏng Wokwi cho Week 2 |
-| firmware/ | Firmware ESP32 cho các tuần sau |
-| middleware/ | Node-RED, Mosquitto cho các tuần sau |
-| dashboard/ | Dashboard cho các tuần sau |
-| tests/ | Script kiểm thử cho các tuần sau |
-| screenshots/ | Ảnh minh họa |
-| videos/ | Video minh họa |
-
-## 4. Tiến độ 10 tuần
-
-| Tuần | Giai đoạn | Trạng thái |
+| Topic | Chiều | Mục đích |
 |---|---|---|
-| 1 | Kiến trúc | Hoàn thành |
-| 2 | Mô phỏng Wokwi | Chờ xác minh thực tế |
-| 3 | Firmware ESP32 | Chưa thực hiện |
-| 4 | Wi-Fi và MQTT | Chưa thực hiện |
-| 5 | Middleware Node-RED | Chưa thực hiện |
-| 6 | Dashboard / ứng dụng | Chưa thực hiện |
-| 7 | Tăng cường tự động hóa | Chưa thực hiện |
-| 8 | Tích hợp đầu cuối | Chưa thực hiện |
-| 9 | Kiểm thử và tài liệu | Chưa thực hiện |
-| 10 | Demo cuối kỳ | Chưa thực hiện |
+| `telemetry` | ESP32 -> Node-RED | Tín hiệu tổng hợp, dùng `current_signal`, không giả mạo Ampere |
+| `current` | ESP32 -> Node-RED | Tín hiệu ADC và threshold |
+| `presence` | ESP32 -> Node-RED | `PRESENT` hoặc `NONE` |
+| `status` | Hai chiều/retained | Online, store, mode, state |
+| `event` | ESP32/Node-RED -> dashboard | Sự kiện và lỗi |
+| `relay/state` | ESP32 -> Node-RED | Phản hồi relay |
+| `cmd/relay` | Node-RED -> ESP32 | `ON` hoặc `OFF` |
+| `cmd/mode` | Node-RED -> ESP32 | `AUTO` hoặc `MANUAL` |
+| `cmd/override` | Node-RED -> ESP32 | `ACTIVE` hoặc `CLEAR` |
+| `cmd/threshold` | Node-RED -> ESP32 | `threshold_signal` ADC |
 
-## 5. Trạng thái hiện tại
+`current_signal` là giá trị ADC mô phỏng. Chưa có calibration nên không gọi là Ampere và không dùng `current_a`.
 
-Hiện tại, hệ thống chỉ ở mức Week 2 với mô phỏng Wokwi. Phần logic cục bộ đã được chuẩn bị và kiểm tra về cấu trúc, nhưng cần thực hiện xác minh Wokwi trực tiếp để khẳng định các kịch bản hoạt động đúng như mong đợi.
+## Chạy local bằng Docker
 
-## 6. Week 1 đã làm gì
+1. Cài Docker Desktop và mở Docker Engine.
+2. Tạo `.env` từ `.env.example`, không ghi credential thật vào Git.
+3. Chạy:
 
-Week 1 tập trung vào xác định bài toán, yêu cầu chức năng, giới hạn, kiến trúc hệ thống và kế hoạch triển khai học thuật. Trong giai đoạn này, nhóm đã xác định rõ mục tiêu, yêu cầu chức năng và các ràng buộc kỹ thuật của dự án.
+```powershell
+docker compose up -d
+```
 
-## 7. Week 2 đã làm gì
+4. Mở dashboard tại `http://localhost:8080` và Node-RED tại `http://localhost:1880`.
+5. Mosquitto lắng nghe MQTT ở `localhost:1883`, WebSocket ở `localhost:9001`.
 
-Week 2 xây dựng mô phỏng Wokwi với các thành phần sau:
+Nếu chưa dùng Docker, có thể import `middleware/node-red/flows.json` vào Node-RED cài native và chạy Mosquitto native.
 
-- ESP32 điều khiển logic cục bộ
-- PIR mô phỏng sự hiện diện người
-- Potentiometer mô phỏng tín hiệu analog của cảm biến dòng điện
-- Slide switch mô phỏng trạng thái cửa hàng mở/đóng
-- Relay điều khiển tải mô phỏng
-- LED mô phỏng tải điện
-- Buzzer cảnh báo dòng điện bất thường
+## Build firmware
 
-Week 2 tập trung vào luật chính:
+```powershell
+cd firmware/esp32
+Copy-Item include/config.example.h include/config.h
+# Điền Wi-Fi và MQTT trong include/config.h trên máy triển khai.
+pio run
+pio run -t upload
+pio device monitor
+```
 
-- CLOSED + NO PRESENCE + LOAD ON -> RELAY OFF
+Firmware mặc định relay OFF khi khởi động. Telemetry phát mỗi 2 giây, MQTT tự subscribe command và reconnect khi mất mạng.
 
-Và luật bảo vệ:
+## Wokwi
 
-- CLOSED + PRESENCE -> không tự động tắt tải
+Mở `simulation/wokwi/diagram.json` và `sketch.ino` trong Wokwi. GPIO giữ nguyên:
 
-## 8. Những phần chưa triển khai
+| Tín hiệu | GPIO |
+|---|---:|
+| PIR | 27 |
+| Current signal | 34 |
+| Store state | 26 |
+| Relay | 25 |
+| Buzzer | 33 |
 
-Các phần sau chưa được triển khai và chưa được xác minh là đã hoạt động thực tế:
+Wokwi hiện kiểm thử local logic và Serial Monitor. Kết nối Wokwi tới MQTT local là **NOT VERIFIED**.
 
-- Wi-Fi
-- MQTT
-- Broker MQTT
-- Node-RED
-- Dashboard
-- Telegram
-- Cloud service
-- phần cứng 220V thực tế
-- firmware hoàn chỉnh cho tuần 3+
+## Rule và state machine
 
-## 9. Cách chạy mô phỏng Wokwi
+- `CLOSED + NO PRESENCE + RELAY ON + AUTO` sau delay cấu hình -> `AUTO_SHUTDOWN`, publish `OFF`.
+- `CLOSED + PRESENCE` -> `OCCUPIED`, không tự tắt.
+- `current_signal > threshold_signal` -> `ABNORMAL_CURRENT` và event cảnh báo.
+- `OVERRIDE` -> `MANUAL_OVERRIDE`, automation bị treo cho tới khi clear.
+- Mất heartbeat -> dashboard cần hiển thị `OFFLINE`.
 
-1. Mở thư mục [simulation/wokwi](simulation/wokwi).
-2. Mở file [simulation/wokwi/diagram.json](simulation/wokwi/diagram.json) trong Wokwi.
-3. Mở Serial Monitor ở tốc độ 115200.
-4. Kiểm tra trạng thái cửa hàng bằng slide switch.
-5. Thay đổi PIR và xoay potentiometer để mô phỏng khác nhau.
-6. Quan sát relay, LED và buzzer.
+Các state chính: `NORMAL`, `AFTER_HOURS`, `OCCUPIED`, `AUTO_SHUTDOWN`, `ABNORMAL_CURRENT`, `MANUAL_OVERRIDE`, `FAULT`, `OFFLINE`.
 
-## 10. Cách kiểm thử
+## Kiểm thử
 
-Các kịch bản kiểm thử cần thực hiện trong Wokwi như sau:
+Danh sách T01-T12 nằm tại [tests/test-plan.md](tests/test-plan.md). Tất cả test tích hợp vẫn ghi `NOT VERIFIED` cho tới khi chạy đủ broker, Node-RED và device/simulator.
 
-- T01: cửa hàng mở, không có người, dòng điện bình thường
-- T02: cửa hàng đóng, không có người, tải đang bật -> tự ngắt
-- T03: cửa hàng đóng, có người -> không tự ngắt sai
-- T04: dòng điện vượt ngưỡng -> abnormal_current=YES và buzzer hoạt động
-- T05: sau khi tắt tự động, có người xuất hiện -> relay bật lại
-- T06: cửa hàng mở trở lại -> relay bật lại
+Kiểm tra tĩnh đã thực hiện:
 
-## 11. Giới hạn của mô phỏng
+- JSON Wokwi và Node-RED parse thành công.
+- Firmware ESP32 PlatformIO build thành công.
+- Docker Compose có đủ ba service chính, nhưng chưa chạy vì Docker chưa cài trong môi trường hiện tại.
 
-- Potentiometer chỉ mô phỏng tín hiệu analog cho nhiệm vụ kiểm thử logic ngưỡng.
-- Hệ thống không điều khiển điện áp AC 220V thực tế.
-- LED chỉ là tải mô phỏng, không đại diện cho tải điện thật.
-- Không có MQTT, dashboard, Node-RED, Wi-Fi hay cloud trong Week 2.
-- Logic hiện tại là logic cục bộ trên thiết bị, chưa phải kiến trúc hoàn chỉnh của các tuần sau.
+## Giới hạn và an toàn
 
-## 12. Tài liệu tham khảo
+Mạch chỉ mô phỏng tải DC điện áp thấp. Không dùng sơ đồ này để đấu trực tiếp AC 220V. Cần calibration phần cứng trước khi chuyển `current_signal` sang đơn vị Ampere.
 
-- [docs/requirements/01-problem-statement.md](docs/requirements/01-problem-statement.md)
-- [docs/requirements/02-requirements.md](docs/requirements/02-requirements.md)
-- [docs/architecture/04-architecture.md](docs/architecture/04-architecture.md)
-- [docs/architecture/07-automation-rules.md](docs/architecture/07-automation-rules.md)
-- [docs/test-strategy/08-test-strategy.md](docs/test-strategy/08-test-strategy.md)
-- [simulation/wokwi/README.md](simulation/wokwi/README.md)
+## Tài liệu
 
-## 13. Lưu ý
-
-Tài liệu này chỉ mô tả phần đã thực hiện và đã được kiểm tra về cấu trúc. Không khẳng định các tính năng của tuần sau đã hoàn thành.
+- [Kiến trúc](docs/architecture/04-architecture.md)
+- [MQTT](docs/mqtt/05-mqtt-design.md)
+- [Automation rules](docs/architecture/07-automation-rules.md)
+- [State machine](docs/state-machine/06-state-machine.md)
+- [Test plan](tests/test-plan.md)
