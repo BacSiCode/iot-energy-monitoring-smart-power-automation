@@ -12,7 +12,7 @@ services:
       - mosquitto-log:/mosquitto/log
 
   nodered:
-    image: nodered/node-red:4
+    image: nodered/node-red:latest
     container_name: iot55-nodered
     restart: unless-stopped
     depends_on:

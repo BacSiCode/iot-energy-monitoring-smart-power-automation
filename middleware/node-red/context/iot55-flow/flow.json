@@ -1,0 +1,17 @@
+{
+    "iot55": {
+        "online": false,
+        "storeStatus": "CLOSED",
+        "presence": false,
+        "relay": false,
+        "mode": "AUTO",
+        "override": false,
+        "threshold": 700,
+        "currentSignal": 0,
+        "systemState": "OFFLINE",
+        "events": [],
+        "history": [],
+        "pendingSince": 0,
+        "lastTelemetry": 0
+    }
+}
