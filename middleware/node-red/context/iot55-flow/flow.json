@@ -1,17 +1,41 @@
 {
     "iot55": {
-        "online": false,
+        "online": true,
         "storeStatus": "CLOSED",
-        "presence": false,
+        "presence": true,
         "relay": false,
         "mode": "AUTO",
         "override": false,
         "threshold": 700,
-        "currentSignal": 0,
-        "systemState": "OFFLINE",
-        "events": [],
-        "history": [],
+        "currentSignal": 1200,
+        "systemState": "ABNORMAL_CURRENT",
+        "events": [
+            {
+                "device_id": "device01",
+                "timestamp_ms": 1790910043361,
+                "event_type": "ABNORMAL_CURRENT",
+                "severity": "WARNING",
+                "description": "Current signal exceeded threshold"
+            },
+            {
+                "device_id": "device01",
+                "timestamp_ms": 1790910043361,
+                "event_type": "ABNORMAL_CURRENT",
+                "severity": "WARNING",
+                "description": "Current signal exceeded threshold"
+            }
+        ],
+        "history": [
+            {
+                "t": 1790910043361,
+                "value": 1200
+            },
+            {
+                "t": 1790910201489,
+                "value": 1200
+            }
+        ],
         "pendingSince": 0,
-        "lastTelemetry": 0
+        "lastTelemetry": 1790910201489
     }
 }

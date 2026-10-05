@@ -1,4 +1,5 @@
-[{
+[
+  {
     "id": "iot55-flow",
     "type": "tab",
     "label": "IoT 55 Automation",
@@ -32,7 +33,11 @@
     "inputs": 0,
     "x": 130,
     "y": 100,
-    "wires": [["state-engine"]]
+    "wires": [
+      [
+        "state-engine"
+      ]
+    ]
   },
   {
     "id": "state-engine",
@@ -48,7 +53,14 @@
     "libs": [],
     "x": 390,
     "y": 100,
-    "wires": [["mqtt-command-or-status"], ["event-normalize"]]
+    "wires": [
+      [
+        "mqtt-command-or-status"
+      ],
+      [
+        "event-normalize"
+      ]
+    ]
   },
   {
     "id": "mqtt-command-or-status",
@@ -77,7 +89,11 @@
     "outputs": 1,
     "x": 700,
     "y": 140,
-    "wires": [["event-out"]]
+    "wires": [
+      [
+        "event-out"
+      ]
+    ]
   },
   {
     "id": "event-out",
@@ -103,7 +119,11 @@
     "swaggerDoc": "",
     "x": 130,
     "y": 260,
-    "wires": [["api-state-response"]]
+    "wires": [
+      [
+        "api-state-response"
+      ]
+    ]
   },
   {
     "id": "api-state-response",
@@ -114,7 +134,11 @@
     "outputs": 1,
     "x": 370,
     "y": 260,
-    "wires": [["http-response"]]
+    "wires": [
+      [
+        "http-response"
+      ]
+    ]
   },
   {
     "id": "http-response",
@@ -138,18 +162,30 @@
     "swaggerDoc": "",
     "x": 140,
     "y": 340,
-    "wires": [["api-command-build"]]
+    "wires": [
+      [
+        "api-command-build"
+      ]
+    ]
   },
   {
     "id": "api-command-build",
     "type": "function",
     "z": "iot55-flow",
     "name": "Build validated command",
-    "func": "const body = typeof msg.payload === 'string' ? JSON.parse(msg.payload || '{}') : (msg.payload || {}); const allowed = ['ON','OFF','AUTO','OVERRIDE','CLEAR_OVERRIDE']; if (!allowed.includes(body.command)) { msg.statusCode = 400; msg.payload = { error: 'Unsupported command' }; return [null, msg]; } let topic = 'iot55/device01/cmd/relay'; let payload = { command: body.command === 'AUTO' ? 'ON' : body.command === 'OVERRIDE' || body.command === 'CLEAR_OVERRIDE' ? 'ON' : body.command, source: 'DASHBOARD', timestamp_ms: Date.now() }; if (body.command === 'AUTO') { topic = 'iot55/device01/cmd/override'; payload = { override: 'CLEAR', source: 'DASHBOARD', timestamp_ms: Date.now() }; } else if (body.command === 'OVERRIDE') { topic = 'iot55/device01/cmd/override'; payload = { override: 'ACTIVE', source: 'DASHBOARD', timestamp_ms: Date.now() }; } else if (body.command === 'CLEAR_OVERRIDE') { topic = 'iot55/device01/cmd/override'; payload = { override: 'CLEAR', source: 'DASHBOARD', timestamp_ms: Date.now() }; } msg.topic = topic; msg.payload = JSON.stringify(payload); return [msg, null];",
+    "func": "const body = typeof msg.payload === 'string' ? JSON.parse(msg.payload || '{}') : (msg.payload || {});\nconst allowed = ['ON','OFF','AUTO','OVERRIDE','CLEAR_OVERRIDE','SET_THRESHOLD'];\nif (!allowed.includes(body.command)) {\n    msg.statusCode = 400;\n    msg.payload = { error: 'Unsupported command', command: body.command || null };\n    return [null, msg];\n}\n\nif (body.command === 'SET_THRESHOLD') {\n    const value = Number(body.value ?? body.threshold ?? NaN);\n    if (!Number.isFinite(value) || value <= 0) {\n        msg.statusCode = 400;\n        msg.payload = { error: 'Invalid threshold', value: body.value ?? body.threshold ?? null };\n        return [null, msg];\n    }\n\n    const state = flow.get('iot55') || { threshold: 700 };\n    state.threshold = value;\n    flow.set('iot55', state);\n\n    msg.topic = 'iot55/device01/cmd/threshold';\n    msg.payload = JSON.stringify({\n        device_id: 'device01',\n        threshold_signal: value,\n        source: 'DASHBOARD',\n        timestamp_ms: Date.now()\n    });\n    return [msg, null];\n}\n\nlet topic = 'iot55/device01/cmd/relay';\nlet payload = {\n    command: body.command === 'AUTO' ? 'ON' : body.command === 'OVERRIDE' || body.command === 'CLEAR_OVERRIDE' ? 'ON' : body.command,\n    source: 'DASHBOARD',\n    timestamp_ms: Date.now()\n};\n\nif (body.command === 'AUTO') {\n    topic = 'iot55/device01/cmd/override';\n    payload = { override: 'CLEAR', source: 'DASHBOARD', timestamp_ms: Date.now() };\n} else if (body.command === 'OVERRIDE') {\n    topic = 'iot55/device01/cmd/override';\n    payload = { override: 'ACTIVE', source: 'DASHBOARD', timestamp_ms: Date.now() };\n} else if (body.command === 'CLEAR_OVERRIDE') {\n    topic = 'iot55/device01/cmd/override';\n    payload = { override: 'CLEAR', source: 'DASHBOARD', timestamp_ms: Date.now() };\n}\n\nmsg.topic = topic;\nmsg.payload = JSON.stringify(payload);\nreturn [msg, null];",
     "outputs": 2,
     "x": 390,
     "y": 340,
-    "wires": [["mqtt-command-or-status","api-ok"],["api-error"]]
+    "wires": [
+      [
+        "mqtt-command-or-status",
+        "api-ok"
+      ],
+      [
+        "api-error"
+      ]
+    ]
   },
   {
     "id": "api-ok",
@@ -160,7 +196,11 @@
     "outputs": 1,
     "x": 680,
     "y": 320,
-    "wires": [["http-response"]]
+    "wires": [
+      [
+        "http-response"
+      ]
+    ]
   },
   {
     "id": "api-error",
@@ -171,14 +211,22 @@
     "outputs": 1,
     "x": 680,
     "y": 380,
-    "wires": [["http-response"]]
+    "wires": [
+      [
+        "http-response"
+      ]
+    ]
   },
   {
     "id": "scheduler-tick",
     "type": "inject",
     "z": "iot55-flow",
     "name": "Scheduler tick",
-    "props": [{ "p": "payload" }],
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
     "repeat": "60",
     "crontab": "",
     "once": true,
@@ -188,7 +236,11 @@
     "payloadType": "date",
     "x": 140,
     "y": 460,
-    "wires": [["scheduler-function"]]
+    "wires": [
+      [
+        "scheduler-function"
+      ]
+    ]
   },
   {
     "id": "scheduler-function",
@@ -199,6 +251,10 @@
     "outputs": 1,
     "x": 410,
     "y": 460,
-    "wires": [["mqtt-command-or-status"]]
+    "wires": [
+      [
+        "mqtt-command-or-status"
+      ]
+    ]
   }
 ]
