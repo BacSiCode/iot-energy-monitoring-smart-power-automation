@@ -1,260 +1,366 @@
 [
-  {
-    "id": "iot55-flow",
-    "type": "tab",
-    "label": "IoT 55 Automation",
-    "disabled": false,
-    "info": "Telemetry validation, state machine, scheduler, events and dashboard API"
-  },
-  {
-    "id": "mqtt-broker-iot55",
-    "type": "mqtt-broker",
-    "name": "Mosquitto",
-    "broker": "mosquitto",
-    "port": "1883",
-    "clientid": "node-red-iot55",
-    "usetls": false,
-    "protocolVersion": "4",
-    "keepalive": "60",
-    "cleansession": true
-  },
-  {
-    "id": "telemetry-input",
-    "type": "mqtt in",
-    "z": "iot55-flow",
-    "name": "Device messages",
-    "topic": "iot55/device01/telemetry",
-    "qos": "1",
-    "datatype": "auto-detect",
-    "broker": "mqtt-broker-iot55",
-    "nl": false,
-    "rap": true,
-    "rh": 0,
-    "inputs": 0,
-    "x": 130,
-    "y": 100,
-    "wires": [
-      [
-        "state-engine"
-      ]
-    ]
-  },
-  {
-    "id": "state-engine",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Validate, state machine and rules",
-    "func": "const topic = msg.topic || '';\nlet payload;\ntry { payload = typeof msg.payload === 'string' ? JSON.parse(msg.payload) : msg.payload; } catch (error) {\n    node.warn('Invalid JSON on ' + topic);\n    return [null, event('INVALID_PAYLOAD', 'Invalid JSON received')];\n}\nconst state = flow.get('iot55') || { online: false, storeStatus: 'OPEN', presence: false, relay: false, mode: 'AUTO', override: false, threshold: 700, currentSignal: 0, systemState: 'OFFLINE', events: [], history: [], pendingSince: 0, lastTelemetry: 0 };\nconst now = Date.now();\nlet command = null;\nlet emittedEvent = null;\nconst emit = (type, description, severity = 'INFO') => { emittedEvent = event(type, description, severity); state.events.unshift(emittedEvent.payload); state.events = state.events.slice(0, 50); };\n\nif (topic.endsWith('/telemetry')) {\n    if (!payload || payload.device_id !== 'device01' || typeof payload !== 'object') return [null, event('INVALID_PAYLOAD', 'Telemetry missing device_id')];\n    state.online = true; state.lastTelemetry = now;\n    state.currentSignal = Number(payload.current_signal ?? payload.current_adc ?? 0);\n    state.threshold = Number(payload.current_threshold_signal ?? state.threshold);\n    state.presence = payload.presence === true || payload.presence === 'PRESENT' || payload.presence === 'YES';\n    state.storeStatus = String(payload.store_status || state.storeStatus).toUpperCase();\n    state.relay = payload.relay === true || payload.relay === 'ON' || payload.relay_state === 'ON';\n    state.mode = String(payload.mode || state.mode).toUpperCase();\n    state.override = Boolean(payload.override_active) || state.mode === 'MANUAL';\n    state.history.push({ t: now, value: state.currentSignal }); state.history = state.history.slice(-60);\n    if (state.currentSignal > state.threshold) {\n        if (state.systemState !== 'ABNORMAL_CURRENT') emit('ABNORMAL_CURRENT', 'Current signal exceeded threshold', 'WARNING');\n        state.systemState = 'ABNORMAL_CURRENT';\n    } else if (state.override) state.systemState = 'MANUAL_OVERRIDE';\n    else if (state.storeStatus === 'CLOSED' && state.presence) state.systemState = 'OCCUPIED';\n    else if (state.storeStatus === 'CLOSED' && !state.relay) state.systemState = 'AUTO_SHUTDOWN';\n    else if (state.storeStatus === 'CLOSED') state.systemState = 'AFTER_HOURS';\n    else state.systemState = 'NORMAL';\n    const delay = Number(env.get('AUTO_SHUTDOWN_DELAY_SECONDS') || 60) * 1000;\n    const eligible = state.storeStatus === 'CLOSED' && !state.presence && state.relay && state.mode === 'AUTO' && !state.override;\n    if (eligible) {\n        if (!state.pendingSince) state.pendingSince = now;\n        if (now - state.pendingSince >= delay) { command = relayCommand('OFF', 'AUTO_RULE1'); state.pendingSince = 0; state.systemState = 'AUTO_SHUTDOWN'; emit('AUTO_SHUTDOWN', 'Store closed with no presence; relay OFF'); }\n    } else state.pendingSince = 0;\n} else if (topic.endsWith('/status')) {\n    state.online = payload && payload.online === true;\n    state.systemState = state.online ? state.systemState : 'OFFLINE';\n} else if (topic.endsWith('/relay/state')) {\n    state.relay = payload && (payload.state === 'ON' || payload.relay === true);\n} else if (topic.endsWith('/cmd/relay')) {\n    const requested = String(payload.command || '').toUpperCase();\n    if (!['ON', 'OFF'].includes(requested)) return [null, event('INVALID_PAYLOAD', 'Unsupported relay command')];\n    state.relay = requested === 'ON'; command = relayCommand(requested, payload.source || 'REMOTE'); emit(requested === 'ON' ? 'REMOTE_ON' : 'REMOTE_OFF', 'Relay changed by remote command');\n} else if (topic.endsWith('/cmd/mode')) {\n    const requested = String(payload.mode || '').toUpperCase();\n    if (!['AUTO', 'MANUAL'].includes(requested)) return [null, event('INVALID_PAYLOAD', 'Unsupported mode')];\n    state.mode = requested; state.override = requested === 'MANUAL'; state.systemState = state.override ? 'MANUAL_OVERRIDE' : 'NORMAL';\n} else if (topic.endsWith('/cmd/override')) {\n    const requested = String(payload.override || '').toUpperCase();\n    if (!['ACTIVE', 'CLEAR'].includes(requested)) return [null, event('INVALID_PAYLOAD', 'Unsupported override command')];\n    state.override = requested === 'ACTIVE'; state.mode = state.override ? 'MANUAL' : 'AUTO'; state.systemState = state.override ? 'MANUAL_OVERRIDE' : 'NORMAL'; emit(state.override ? 'MANUAL_OVERRIDE' : 'OVERRIDE_CLEARED', 'Override state changed');\n} else if (topic.endsWith('/cmd/threshold')) {\n    const requested = Number(payload.threshold_signal);\n    if (!Number.isInteger(requested) || requested < 1 || requested > 4095) return [null, event('INVALID_PAYLOAD', 'Threshold must be between 1 and 4095')];\n    state.threshold = requested;\n}\nflow.set('iot55', state);\nconst stateMessage = { topic: 'iot55/device01/status', payload: JSON.stringify({ device_id: 'device01', online: state.online, store_status: state.storeStatus, presence: state.presence, relay: state.relay, mode: state.mode, override_active: state.override, current_signal: state.currentSignal, threshold_signal: state.threshold, state: state.systemState, last_telemetry: state.lastTelemetry }) };\nreturn [command || stateMessage, emittedEvent];\n\nfunction relayCommand(command, source) { return { topic: 'iot55/device01/cmd/relay', payload: JSON.stringify({ command, source, timestamp_ms: Date.now() }) }; }\nfunction event(type, description, severity = 'ERROR') { return { topic: 'iot55/device01/event', payload: { device_id: 'device01', timestamp_ms: Date.now(), event_type: type, severity, description } }; }",
-    "outputs": 2,
-    "timeout": 0,
-    "noerr": 0,
-    "initialize": "if (!flow.get('iot55')) flow.set('iot55', { online: false, storeStatus: 'OPEN', presence: false, relay: false, mode: 'AUTO', override: false, threshold: 700, currentSignal: 0, systemState: 'OFFLINE', events: [], history: [], pendingSince: 0, lastTelemetry: 0 });",
-    "finalize": "",
-    "libs": [],
-    "x": 390,
-    "y": 100,
-    "wires": [
-      [
-        "mqtt-command-or-status"
-      ],
-      [
-        "event-normalize"
-      ]
-    ]
-  },
-  {
-    "id": "mqtt-command-or-status",
-    "type": "mqtt out",
-    "z": "iot55-flow",
-    "name": "MQTT downlink/status",
-    "topic": "",
-    "qos": "1",
-    "retain": "",
-    "respTopic": "",
-    "contentType": "",
-    "userProps": "",
-    "correl": "",
-    "expiry": "",
-    "broker": "mqtt-broker-iot55",
-    "x": 760,
-    "y": 80,
-    "wires": []
-  },
-  {
-    "id": "event-normalize",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Event log",
-    "func": "if (!msg.payload || typeof msg.payload !== 'object') return null;\nconst state = flow.get('iot55') || {};\nstate.events = state.events || [];\nstate.events.unshift(msg.payload); state.events = state.events.slice(0, 50); flow.set('iot55', state);\nmsg.payload = JSON.stringify(msg.payload); return msg;",
-    "outputs": 1,
-    "x": 700,
-    "y": 140,
-    "wires": [
-      [
-        "event-out"
-      ]
-    ]
-  },
-  {
-    "id": "event-out",
-    "type": "mqtt out",
-    "z": "iot55-flow",
-    "name": "Publish events",
-    "topic": "",
-    "qos": "1",
-    "retain": "false",
-    "broker": "mqtt-broker-iot55",
-    "x": 940,
-    "y": 140,
-    "wires": []
-  },
-  {
-    "id": "api-state",
-    "type": "http in",
-    "z": "iot55-flow",
-    "name": "Dashboard state",
-    "url": "/api/state",
-    "method": "get",
-    "upload": false,
-    "swaggerDoc": "",
-    "x": 130,
-    "y": 260,
-    "wires": [
-      [
-        "api-state-response"
-      ]
-    ]
-  },
-  {
-    "id": "api-state-response",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Return current state",
-    "func": "msg.headers = { 'content-type': 'application/json' }; msg.payload = flow.get('iot55') || {}; return msg;",
-    "outputs": 1,
-    "x": 370,
-    "y": 260,
-    "wires": [
-      [
-        "http-response"
-      ]
-    ]
-  },
-  {
-    "id": "http-response",
-    "type": "http response",
-    "z": "iot55-flow",
-    "name": "HTTP response",
-    "statusCode": "",
-    "headers": {},
-    "x": 620,
-    "y": 260,
-    "wires": []
-  },
-  {
-    "id": "api-command",
-    "type": "http in",
-    "z": "iot55-flow",
-    "name": "Dashboard command",
-    "url": "/api/command",
-    "method": "post",
-    "upload": false,
-    "swaggerDoc": "",
-    "x": 140,
-    "y": 340,
-    "wires": [
-      [
-        "api-command-build"
-      ]
-    ]
-  },
-  {
-    "id": "api-command-build",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Build validated command",
-    "func": "const body = typeof msg.payload === 'string' ? JSON.parse(msg.payload || '{}') : (msg.payload || {});\nconst allowed = ['ON','OFF','AUTO','OVERRIDE','CLEAR_OVERRIDE','SET_THRESHOLD'];\nif (!allowed.includes(body.command)) {\n    msg.statusCode = 400;\n    msg.payload = { error: 'Unsupported command', command: body.command || null };\n    return [null, msg];\n}\n\nif (body.command === 'SET_THRESHOLD') {\n    const value = Number(body.value ?? body.threshold ?? NaN);\n    if (!Number.isFinite(value) || value <= 0) {\n        msg.statusCode = 400;\n        msg.payload = { error: 'Invalid threshold', value: body.value ?? body.threshold ?? null };\n        return [null, msg];\n    }\n\n    const state = flow.get('iot55') || { threshold: 700 };\n    state.threshold = value;\n    flow.set('iot55', state);\n\n    msg.topic = 'iot55/device01/cmd/threshold';\n    msg.payload = JSON.stringify({\n        device_id: 'device01',\n        threshold_signal: value,\n        source: 'DASHBOARD',\n        timestamp_ms: Date.now()\n    });\n    return [msg, null];\n}\n\nlet topic = 'iot55/device01/cmd/relay';\nlet payload = {\n    command: body.command === 'AUTO' ? 'ON' : body.command === 'OVERRIDE' || body.command === 'CLEAR_OVERRIDE' ? 'ON' : body.command,\n    source: 'DASHBOARD',\n    timestamp_ms: Date.now()\n};\n\nif (body.command === 'AUTO') {\n    topic = 'iot55/device01/cmd/override';\n    payload = { override: 'CLEAR', source: 'DASHBOARD', timestamp_ms: Date.now() };\n} else if (body.command === 'OVERRIDE') {\n    topic = 'iot55/device01/cmd/override';\n    payload = { override: 'ACTIVE', source: 'DASHBOARD', timestamp_ms: Date.now() };\n} else if (body.command === 'CLEAR_OVERRIDE') {\n    topic = 'iot55/device01/cmd/override';\n    payload = { override: 'CLEAR', source: 'DASHBOARD', timestamp_ms: Date.now() };\n}\n\nmsg.topic = topic;\nmsg.payload = JSON.stringify(payload);\nreturn [msg, null];",
-    "outputs": 2,
-    "x": 390,
-    "y": 340,
-    "wires": [
-      [
-        "mqtt-command-or-status",
-        "api-ok"
-      ],
-      [
-        "api-error"
-      ]
-    ]
-  },
-  {
-    "id": "api-ok",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Command accepted",
-    "func": "msg.headers = { 'content-type': 'application/json' }; msg.payload = JSON.stringify({ accepted: true }); return msg;",
-    "outputs": 1,
-    "x": 680,
-    "y": 320,
-    "wires": [
-      [
-        "http-response"
-      ]
-    ]
-  },
-  {
-    "id": "api-error",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Command rejected",
-    "func": "msg.headers = { 'content-type': 'application/json' }; msg.payload = JSON.stringify(msg.payload); return msg;",
-    "outputs": 1,
-    "x": 680,
-    "y": 380,
-    "wires": [
-      [
-        "http-response"
-      ]
-    ]
-  },
-  {
-    "id": "scheduler-tick",
-    "type": "inject",
-    "z": "iot55-flow",
-    "name": "Scheduler tick",
-    "props": [
-      {
-        "p": "payload"
-      }
-    ],
-    "repeat": "60",
-    "crontab": "",
-    "once": true,
-    "onceDelay": "2",
-    "topic": "scheduler",
-    "payload": "",
-    "payloadType": "date",
-    "x": 140,
-    "y": 460,
-    "wires": [
-      [
-        "scheduler-function"
-      ]
-    ]
-  },
-  {
-    "id": "scheduler-function",
-    "type": "function",
-    "z": "iot55-flow",
-    "name": "Opening and closing scheduler",
-    "func": "const state = flow.get('iot55') || {}; const open = env.get('STORE_OPEN_TIME') || '08:00'; const close = env.get('STORE_CLOSE_TIME') || '22:00'; const hhmm = new Date().toTimeString().slice(0,5); let status = hhmm >= open && hhmm < close ? 'OPEN' : 'CLOSED'; if (state.storeStatus !== status) { state.storeStatus = status; flow.set('iot55', state); msg.topic = 'iot55/device01/status'; msg.payload = JSON.stringify({ device_id: 'device01', store_status: status, source: 'SCHEDULER', timestamp_ms: Date.now() }); return msg; } return null;",
-    "outputs": 1,
-    "x": 410,
-    "y": 460,
-    "wires": [
-      [
-        "mqtt-command-or-status"
-      ]
-    ]
-  }
+    {
+        "id": "iot55-flow",
+        "type": "tab",
+        "label": "IoT 55 - Energy Automation",
+        "disabled": false,
+        "info": "Generated by scripts/build-flows.js from middleware/node-red/src. Edit the sources, not this file."
+    },
+    {
+        "id": "iot55-broker",
+        "type": "mqtt-broker",
+        "name": "IoT55 broker",
+        "broker": "${MQTT_HOST}",
+        "port": "${MQTT_PORT}",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "30",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "closeTopic": "",
+        "willTopic": ""
+    },
+    {
+        "id": "comment-uplink",
+        "type": "comment",
+        "z": "iot55-flow",
+        "name": "UPLINK: ESP32 -> MQTT -> state engine",
+        "x": 190,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "in-telemetry",
+        "type": "mqtt in",
+        "z": "iot55-flow",
+        "name": "telemetry",
+        "topic": "iot55/device01/telemetry",
+        "qos": "1",
+        "datatype": "utf8",
+        "broker": "iot55-broker",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 80,
+        "wires": [
+            [
+                "state-engine"
+            ]
+        ]
+    },
+    {
+        "id": "in-status",
+        "type": "mqtt in",
+        "z": "iot55-flow",
+        "name": "status",
+        "topic": "iot55/device01/status",
+        "qos": "1",
+        "datatype": "utf8",
+        "broker": "iot55-broker",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 120,
+        "wires": [
+            [
+                "state-engine"
+            ]
+        ]
+    },
+    {
+        "id": "in-event",
+        "type": "mqtt in",
+        "z": "iot55-flow",
+        "name": "event",
+        "topic": "iot55/device01/event",
+        "qos": "1",
+        "datatype": "utf8",
+        "broker": "iot55-broker",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 160,
+        "wires": [
+            [
+                "state-engine"
+            ]
+        ]
+    },
+    {
+        "id": "in-relay-state",
+        "type": "mqtt in",
+        "z": "iot55-flow",
+        "name": "relay/state",
+        "topic": "iot55/device01/relay/state",
+        "qos": "1",
+        "datatype": "utf8",
+        "broker": "iot55-broker",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 200,
+        "wires": [
+            [
+                "state-engine"
+            ]
+        ]
+    },
+    {
+        "id": "scheduler-tick",
+        "type": "inject",
+        "z": "iot55-flow",
+        "name": "Tick 5s (scheduler + heartbeat)",
+        "props": [
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "internal/tick",
+        "x": 190,
+        "y": 260,
+        "wires": [
+            [
+                "state-engine"
+            ]
+        ]
+    },
+    {
+        "id": "state-engine",
+        "type": "function",
+        "z": "iot55-flow",
+        "name": "State engine: validate, FSM, rules, log",
+        "func": "// IoT 55 state engine: validation, state machine, automation rules, event log.\n// Node-RED function node body (inlined into flows.json by scripts/build-flows.js).\n//\n// Input msg.topic:\n//   iot55/device01/telemetry | status | event | relay/state   (MQTT uplink)\n//   internal/tick      every 5 s: scheduler, heartbeat timeout, relay feedback timeout\n//   internal/command   HTTP API body { command, value }\n// Outputs:\n//   1 MQTT downlink commands   2 event log (MQTT)   3 system state (MQTT, retained)   4 HTTP response\n\nconst DEVICE_ID = 'device01';\nconst BASE = 'iot55/' + DEVICE_ID + '/';\nconst HYSTERESIS = 30;\nconst RELAY_FEEDBACK_TIMEOUT_MS = 10000;\nconst MAX_EVENTS = 100;\nconst MAX_HISTORY = 60;\n\nconst cfg = {\n    shutdownDelayMs: numberEnv('AUTO_SHUTDOWN_DELAY_SECONDS', 10) * 1000,\n    offlineTimeoutMs: numberEnv('DEVICE_TIMEOUT_SECONDS', 15) * 1000,\n    storeSource: textEnv('STORE_STATUS_SOURCE', 'SWITCH'), // SWITCH | SCHEDULE\n    safetyMode: textEnv('SAFETY_MODE', 'ALERT_ONLY'),      // ALERT_ONLY | CUTOFF\n    openTime: env.get('STORE_OPEN_TIME') || '08:00',\n    closeTime: env.get('STORE_CLOSE_TIME') || '22:00'\n};\n\nconst now = Date.now();\nconst stored = flow.get('iot55');\nconst s = stored && stored.schema === 2 ? stored : initialState();\nconst out = { commands: [], events: [], reply: null };\nconst topic = String(msg.topic || '');\n\nif (topic === 'internal/tick') onTick();\nelse if (topic === 'internal/command') onCommand(msg.payload || {});\nelse {\n    const payload = parseJson(msg.payload);\n    if (payload === undefined) logEvent('INVALID_PAYLOAD', 'WARNING', 'MALFORMED_JSON', { topic });\n    else if (topic === BASE + 'telemetry') onTelemetry(payload);\n    else if (topic === BASE + 'status') onStatus(payload);\n    else if (topic === BASE + 'event') onDeviceEvent(payload);\n    else if (topic === BASE + 'relay/state') onRelayState(payload);\n    else logEvent('INVALID_PAYLOAD', 'WARNING', 'UNEXPECTED_TOPIC', { topic });\n}\n\nevaluate();\ns.config = cfg;\ns.countdownMs = s.pendingSince ? Math.max(0, cfg.shutdownDelayMs - (now - s.pendingSince)) : null;\ns.updatedAt = now;\nflow.set('iot55', s);\n\nconst stateMsg = { topic: BASE + 'system/state', retain: true, payload: JSON.stringify(snapshot()) };\nlet httpReply = null;\nif (out.reply) {\n    httpReply = msg;\n    httpReply.statusCode = out.reply.statusCode;\n    httpReply.headers = { 'content-type': 'application/json' };\n    httpReply.payload = out.reply.body;\n}\nreturn [out.commands, out.events, stateMsg, httpReply];\n\n// ---------------------------------------------------------------------------\n// Uplink handlers\n// ---------------------------------------------------------------------------\nfunction onTelemetry(p) {\n    const error = validateTelemetry(p);\n    if (error) return logEvent('INVALID_PAYLOAD', 'WARNING', error, { topic: BASE + 'telemetry' });\n    markSeen();\n    const first = !s.initialized;\n    const prev = { presence: s.presence, override: s.override, mode: s.mode };\n\n    s.currentSignal = p.current_signal;\n    s.currentA = Number.isFinite(Number(p.current_a)) ? Number(p.current_a) : null;\n    s.threshold = Number.isInteger(p.threshold_signal) ? p.threshold_signal : s.threshold;\n    s.thresholdA = Number.isFinite(Number(p.threshold_a)) ? Number(p.threshold_a) : s.thresholdA;\n    s.presence = p.presence;\n    s.storeSwitch = p.store_status;\n    s.relay = p.relay;\n    s.mode = p.mode === 'MANUAL' ? 'MANUAL' : 'AUTO';\n    s.override = p.override_active === true;\n    s.overrideSource = p.override_source || null;\n    s.wifiRssi = p.wifi_rssi ?? null;\n    s.lastTelemetry = now;\n    s.initialized = true;\n    s.history.push({ t: now, signal: s.currentSignal, a: s.currentA });\n    if (s.history.length > MAX_HISTORY) s.history = s.history.slice(-MAX_HISTORY);\n\n    if (first) return;\n    if (prev.presence !== s.presence) {\n        logEvent(s.presence ? 'PRESENCE_DETECTED' : 'PRESENCE_CLEARED', 'INFO', s.presence ? 'PIR_MOTION' : 'PRESENCE_HOLD_EXPIRED');\n    }\n    if (prev.override !== s.override) {\n        logEvent(s.override ? 'MANUAL_OVERRIDE' : 'OVERRIDE_CLEARED', 'INFO', s.override ? (s.overrideSource || 'UNKNOWN') : 'CLEARED');\n    }\n    if (prev.mode !== s.mode) {\n        logEvent(s.mode === 'AUTO' ? 'AUTOMATION_ENABLED' : 'AUTOMATION_DISABLED', 'INFO', 'MODE_' + s.mode);\n    }\n}\n\nfunction validateTelemetry(p) {\n    if (!isObject(p)) return 'PAYLOAD_NOT_OBJECT';\n    if (p.device_id !== DEVICE_ID) return 'DEVICE_ID_MISMATCH';\n    if (!Number.isInteger(p.current_signal) || p.current_signal < 0 || p.current_signal > 4095) return 'CURRENT_SIGNAL_INVALID';\n    if (typeof p.presence !== 'boolean') return 'PRESENCE_INVALID';\n    if (p.store_status !== 'OPEN' && p.store_status !== 'CLOSED') return 'STORE_STATUS_INVALID';\n    if (typeof p.relay !== 'boolean') return 'RELAY_INVALID';\n    return null;\n}\n\nfunction onStatus(p) {\n    if (!isObject(p)) return logEvent('INVALID_PAYLOAD', 'WARNING', 'PAYLOAD_NOT_OBJECT', { topic: BASE + 'status' });\n    if (p.online === false) return setOffline('LWT_OFFLINE');\n    if (p.online === true) {\n        s.firmware = p.fw || s.firmware;\n        s.ip = p.ip || s.ip;\n        s.mqttConnects = p.mqtt_connects ?? s.mqttConnects;\n        markSeen();\n    }\n}\n\nfunction onDeviceEvent(p) {\n    if (!isObject(p) || p.origin === 'middleware') return; // ignore our own events (loop guard)\n    if (typeof p.event_type !== 'string') return logEvent('INVALID_PAYLOAD', 'WARNING', 'EVENT_TYPE_MISSING', { topic: BASE + 'event' });\n    if (p.event_type === 'COMMAND_REJECTED') s.pendingRelay = null;\n    if (p.event_type === 'AUTO_SHUTDOWN') s.autoShutdownActive = true; // local fallback on the device\n    pushEvent(Object.assign({}, p, { origin: 'device', received_at: new Date(now).toISOString(), timestamp_ms: now }));\n}\n\nfunction onRelayState(p) {\n    if (!isObject(p) || (p.state !== 'ON' && p.state !== 'OFF')) {\n        return logEvent('INVALID_PAYLOAD', 'WARNING', 'RELAY_STATE_INVALID', { topic: BASE + 'relay/state' });\n    }\n    const on = p.state === 'ON';\n    const changed = s.relay !== null && s.relay !== on;\n    s.relay = on;\n    s.relayChangedBy = p.changed_by || null;\n    if (on) s.autoShutdownActive = false;\n    if (s.pendingRelay && s.pendingRelay.expected === on) s.pendingRelay = null;\n    if (s.fault === 'RELAY_NO_FEEDBACK') {\n        s.fault = null;\n        logEvent('FAULT_CLEARED', 'INFO', 'RELAY_FEEDBACK_RECEIVED');\n    }\n    if (changed) logEvent(on ? 'RELAY_ON' : 'RELAY_OFF', 'INFO', 'CHANGED_BY_' + (s.relayChangedBy || 'UNKNOWN'));\n}\n\n// ---------------------------------------------------------------------------\n// Timer: scheduler, heartbeat, relay feedback\n// ---------------------------------------------------------------------------\nfunction onTick() {\n    s.scheduleStatus = scheduleStatusAt(new Date(now));\n    if (s.online && s.lastSeen && now - s.lastSeen > cfg.offlineTimeoutMs) setOffline('HEARTBEAT_TIMEOUT');\n    if (s.pendingRelay && s.online && now - s.pendingRelay.at > RELAY_FEEDBACK_TIMEOUT_MS) {\n        s.pendingRelay = null;\n        s.fault = 'RELAY_NO_FEEDBACK';\n        logEvent('FAULT', 'ERROR', 'RELAY_NO_FEEDBACK');\n    }\n}\n\nfunction scheduleStatusAt(date) {\n    const hhmm = String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');\n    const open = cfg.openTime;\n    const close = cfg.closeTime;\n    const isOpen = open <= close ? hhmm >= open && hhmm < close : hhmm >= open || hhmm < close;\n    return isOpen ? 'OPEN' : 'CLOSED';\n}\n\n// ---------------------------------------------------------------------------\n// Rule engine + state machine (runs after every input)\n// ---------------------------------------------------------------------------\nfunction evaluate() {\n    if (!s.scheduleStatus) s.scheduleStatus = scheduleStatusAt(new Date(now));\n    const store = cfg.storeSource === 'SCHEDULE' ? s.scheduleStatus : s.storeSwitch;\n    if (store && s.storeStatus && store !== s.storeStatus) {\n        logEvent(store === 'CLOSED' ? 'STORE_CLOSED' : 'STORE_OPENED', 'INFO', 'SOURCE_' + cfg.storeSource);\n        if (store === 'OPEN' && s.autoShutdownActive && automationActive() && s.relay === false && s.online) {\n            sendRelay('ON', 'AUTO_RESTORE');\n            logEvent('AUTO_RESTORE', 'INFO', 'STORE_OPENED_AFTER_AUTO_SHUTDOWN');\n        }\n        if (store === 'OPEN') s.autoShutdownActive = false;\n    }\n    s.storeStatus = store || s.storeStatus;\n\n    if (s.initialized) {\n        evaluateAbnormalCurrent();\n        evaluateAfterHours();\n    }\n    updateSystemState();\n}\n\n// RULE 3: abnormal current (with hysteresis) + optional safety cutoff.\nfunction evaluateAbnormalCurrent() {\n    const above = s.currentSignal > s.threshold;\n    const below = s.currentSignal < Math.max(0, s.threshold - HYSTERESIS);\n    if (!s.alarm.active && above) {\n        s.alarm = { active: true, acknowledged: false, since: now, peakSignal: s.currentSignal, ackAt: null };\n        logEvent('ABNORMAL_CURRENT', 'WARNING', 'CURRENT_ABOVE_THRESHOLD');\n        if (cfg.safetyMode === 'CUTOFF' && s.relay && s.online) {\n            sendRelay('OFF', 'SAFETY_CUTOFF');\n            logEvent('SAFETY_CUTOFF', 'CRITICAL', 'ABNORMAL_CURRENT_CUTOFF');\n        }\n    } else if (s.alarm.active && below) {\n        s.alarm = { active: false, acknowledged: false, since: null, peakSignal: null, ackAt: null };\n        logEvent('CURRENT_NORMAL', 'INFO', 'CURRENT_BELOW_THRESHOLD');\n    } else if (s.alarm.active) {\n        s.alarm.peakSignal = Math.max(s.alarm.peakSignal || 0, s.currentSignal);\n    }\n}\n\n// RULE 1 (after-hours shutdown, debounced) and RULE 2 (presence protection).\nfunction evaluateAfterHours() {\n    const closed = s.storeStatus === 'CLOSED';\n    const commandInFlight = s.pendingRelay && s.pendingRelay.expected === false;\n    const eligible = s.online && closed && !s.presence && s.relay === true && automationActive() && !commandInFlight;\n    if (!eligible) {\n        if (s.pendingSince && closed && s.presence) logEvent('SHUTDOWN_CANCELLED', 'INFO', 'PRESENCE_DETECTED');\n        s.pendingSince = 0;\n        return;\n    }\n    if (!s.pendingSince) {\n        s.pendingSince = now;\n        return;\n    }\n    if (now - s.pendingSince >= cfg.shutdownDelayMs) {\n        s.pendingSince = 0;\n        s.autoShutdownActive = true;\n        sendRelay('OFF', 'AUTO_RULE1');\n        logEvent('AUTO_SHUTDOWN', 'INFO', 'AFTER_HOURS_NO_PRESENCE');\n    }\n}\n\n// Explicit FSM: the state is derived from inputs by priority; transitions are logged.\nfunction updateSystemState() {\n    let next;\n    if (!s.online) next = 'OFFLINE';\n    else if (s.fault) next = 'FAULT';\n    else if (s.alarm.active) next = 'ABNORMAL_CURRENT';\n    else if (!automationActive()) next = 'MANUAL_OVERRIDE';\n    else if (s.storeStatus === 'CLOSED' && s.presence) next = 'OCCUPIED';\n    else if (s.storeStatus === 'CLOSED' && s.autoShutdownActive && s.relay === false) next = 'AUTO_SHUTDOWN';\n    else if (s.storeStatus === 'CLOSED') next = 'AFTER_HOURS';\n    else next = 'NORMAL';\n    if (next !== s.systemState) {\n        const from = s.systemState;\n        s.systemState = next;\n        s.stateSince = now;\n        logEvent('STATE_CHANGED', 'DEBUG', from + '->' + next);\n    }\n}\n\n// ---------------------------------------------------------------------------\n// Remote commands (HTTP API -> MQTT downlink)\n// ---------------------------------------------------------------------------\nfunction onCommand(body) {\n    const command = String(body.command || '').toUpperCase();\n    const needsDevice = ['RELAY_ON', 'RELAY_OFF', 'OVERRIDE_ON', 'OVERRIDE_OFF'];\n    if (needsDevice.includes(command) && !s.online) return reply(503, { error: 'Device offline', command });\n\n    switch (command) {\n        case 'RELAY_ON':\n        case 'RELAY_OFF':\n            sendRelay(command === 'RELAY_ON' ? 'ON' : 'OFF', 'DASHBOARD');\n            break;\n        case 'MODE_AUTO':\n        case 'MODE_MANUAL':\n            // Retained so the device restores the mode after a reboot/reconnect.\n            sendCommand('cmd/mode', { mode: command === 'MODE_AUTO' ? 'AUTO' : 'MANUAL' }, true);\n            break;\n        case 'OVERRIDE_ON':\n        case 'OVERRIDE_OFF':\n            sendCommand('cmd/override', { override: command === 'OVERRIDE_ON' ? 'ACTIVE' : 'CLEAR' }, false);\n            break;\n        case 'ACK_ALARM':\n            if (!s.alarm.active) return reply(409, { error: 'No active alarm' });\n            if (s.alarm.acknowledged) return reply(409, { error: 'Alarm already acknowledged' });\n            s.alarm.acknowledged = true;\n            s.alarm.ackAt = now;\n            sendCommand('cmd/alarm', { action: 'ACK' }, false);\n            logEvent('ALERT_ACKNOWLEDGED', 'INFO', 'ACK_BY_DASHBOARD');\n            break;\n        case 'SET_THRESHOLD': {\n            const value = Number(body.value);\n            if (!Number.isInteger(value) || value < 1 || value > 4095) {\n                return reply(400, { error: 'Threshold must be an integer 1..4095', value: body.value ?? null });\n            }\n            sendCommand('cmd/threshold', { threshold_signal: value }, true);\n            break;\n        }\n        default:\n            return reply(400, { error: 'Unsupported command', command: body.command ?? null });\n    }\n    logEvent('REMOTE_COMMAND', 'INFO', command + (body.value !== undefined ? '=' + body.value : ''), { source: 'DASHBOARD' });\n    reply(202, { accepted: true, command });\n}\n\nfunction sendRelay(command, source) {\n    s.pendingRelay = { expected: command === 'ON', at: now, source };\n    sendCommand('cmd/relay', { command, source }, false);\n}\n\nfunction sendCommand(suffix, body, retain) {\n    const payload = Object.assign({ device_id: DEVICE_ID }, body, { source: body.source || 'NODE_RED', timestamp_ms: now });\n    out.commands.push({ topic: BASE + suffix, retain, qos: 1, payload: JSON.stringify(payload) });\n    s.lastCommand = { topic: BASE + suffix, payload, at: now };\n}\n\nfunction reply(statusCode, body) {\n    out.reply = { statusCode, body };\n}\n\n// ---------------------------------------------------------------------------\n// Connectivity\n// ---------------------------------------------------------------------------\nfunction markSeen() {\n    s.lastSeen = now;\n    if (!s.online) {\n        s.online = true;\n        logEvent('DEVICE_ONLINE', 'INFO', 'MQTT_CONNECTED');\n    }\n}\n\nfunction setOffline(reason) {\n    s.pendingSince = 0;\n    s.pendingRelay = null;\n    if (!s.online) return;\n    s.online = false;\n    logEvent('DEVICE_OFFLINE', 'WARNING', reason);\n}\n\n// ---------------------------------------------------------------------------\n// Event log\n// ---------------------------------------------------------------------------\nfunction logEvent(type, severity, reason, extra) {\n    const event = Object.assign({\n        timestamp: new Date(now).toISOString(),\n        timestamp_ms: now,\n        device_id: DEVICE_ID,\n        origin: 'middleware',\n        event_type: type,\n        severity,\n        reason,\n        current_a: s.currentA,\n        current_signal: s.currentSignal,\n        state: s.systemState\n    }, extra || {});\n    pushEvent(event);\n    out.events.push({ topic: BASE + 'event', payload: JSON.stringify(event) });\n}\n\nfunction pushEvent(event) {\n    s.events.unshift(event);\n    if (s.events.length > MAX_EVENTS) s.events.length = MAX_EVENTS;\n}\n\n// ---------------------------------------------------------------------------\n// Helpers\n// ---------------------------------------------------------------------------\nfunction automationActive() {\n    return s.mode === 'AUTO' && !s.override;\n}\n\nfunction snapshot() {\n    return {\n        device_id: DEVICE_ID,\n        timestamp: new Date(now).toISOString(),\n        online: s.online,\n        state: s.systemState,\n        store_status: s.storeStatus,\n        store_switch: s.storeSwitch,\n        schedule_status: s.scheduleStatus,\n        presence: s.presence,\n        relay: s.relay,\n        mode: s.mode,\n        override_active: s.override,\n        current_signal: s.currentSignal,\n        current_a: s.currentA,\n        threshold_signal: s.threshold,\n        alarm: s.alarm,\n        fault: s.fault,\n        countdown_ms: s.countdownMs\n    };\n}\n\nfunction parseJson(value) {\n    if (typeof value !== 'string') return value;\n    try { return JSON.parse(value); } catch (error) { return undefined; }\n}\n\nfunction isObject(value) {\n    return value !== null && typeof value === 'object' && !Array.isArray(value);\n}\n\nfunction numberEnv(name, fallback) {\n    const raw = env.get(name);\n    if (raw === undefined || raw === null || raw === '') return fallback;\n    const value = Number(raw);\n    return Number.isFinite(value) && value >= 0 ? value : fallback;\n}\n\nfunction textEnv(name, fallback) {\n    return String(env.get(name) || fallback).toUpperCase();\n}\n\nfunction initialState() {\n    return {\n        schema: 2,\n        initialized: false,\n        online: false,\n        lastSeen: 0,\n        lastTelemetry: 0,\n        firmware: null,\n        ip: null,\n        mqttConnects: null,\n        wifiRssi: null,\n        systemState: 'OFFLINE',\n        stateSince: now,\n        storeStatus: null,\n        storeSwitch: null,\n        scheduleStatus: null,\n        presence: false,\n        relay: null,\n        relayChangedBy: null,\n        mode: 'AUTO',\n        override: false,\n        overrideSource: null,\n        currentSignal: 0,\n        currentA: null,\n        threshold: 700,\n        thresholdA: null,\n        alarm: { active: false, acknowledged: false, since: null, peakSignal: null, ackAt: null },\n        fault: null,\n        pendingSince: 0,\n        pendingRelay: null,\n        autoShutdownActive: false,\n        lastCommand: null,\n        events: [],\n        history: []\n    };\n}\n",
+        "outputs": 4,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 560,
+        "y": 180,
+        "wires": [
+            [
+                "out-downlink"
+            ],
+            [
+                "out-event",
+                "debug-events"
+            ],
+            [
+                "out-state"
+            ],
+            [
+                "http-response"
+            ]
+        ],
+        "outputLabels": [
+            "MQTT downlink",
+            "Event log",
+            "System state",
+            "HTTP reply"
+        ]
+    },
+    {
+        "id": "comment-downlink",
+        "type": "comment",
+        "z": "iot55-flow",
+        "name": "DOWNLINK: commands -> MQTT -> ESP32",
+        "x": 900,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "out-downlink",
+        "type": "mqtt out",
+        "z": "iot55-flow",
+        "name": "cmd/* (downlink)",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "broker": "iot55-broker",
+        "x": 900,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "out-event",
+        "type": "mqtt out",
+        "z": "iot55-flow",
+        "name": "event (log)",
+        "topic": "",
+        "qos": "1",
+        "retain": "false",
+        "broker": "iot55-broker",
+        "x": 890,
+        "y": 170,
+        "wires": []
+    },
+    {
+        "id": "debug-events",
+        "type": "debug",
+        "z": "iot55-flow",
+        "name": "Event log",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 890,
+        "y": 210,
+        "wires": []
+    },
+    {
+        "id": "out-state",
+        "type": "mqtt out",
+        "z": "iot55-flow",
+        "name": "system/state (retained)",
+        "topic": "",
+        "qos": "1",
+        "retain": "",
+        "broker": "iot55-broker",
+        "x": 920,
+        "y": 250,
+        "wires": []
+    },
+    {
+        "id": "comment-api",
+        "type": "comment",
+        "z": "iot55-flow",
+        "name": "APPLICATION API (dashboard via nginx /api)",
+        "x": 220,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "api-state-in",
+        "type": "http in",
+        "z": "iot55-flow",
+        "name": "GET /api/state",
+        "url": "/api/state",
+        "method": "get",
+        "upload": false,
+        "x": 160,
+        "y": 380,
+        "wires": [
+            [
+                "api-state"
+            ]
+        ]
+    },
+    {
+        "id": "api-state",
+        "type": "function",
+        "z": "iot55-flow",
+        "name": "Read state",
+        "func": "// GET /api/state -> full middleware state for the dashboard.\nconst s = flow.get('iot55') || { online: false, systemState: 'OFFLINE', events: [], history: [] };\nmsg.headers = { 'content-type': 'application/json', 'cache-control': 'no-store' };\nmsg.payload = s;\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 380,
+        "wires": [
+            [
+                "http-response"
+            ]
+        ]
+    },
+    {
+        "id": "api-command-in",
+        "type": "http in",
+        "z": "iot55-flow",
+        "name": "POST /api/command",
+        "url": "/api/command",
+        "method": "post",
+        "upload": false,
+        "x": 170,
+        "y": 420,
+        "wires": [
+            [
+                "api-command"
+            ]
+        ]
+    },
+    {
+        "id": "api-command",
+        "type": "function",
+        "z": "iot55-flow",
+        "name": "To state engine",
+        "func": "// POST /api/command -> forward the request body to the state engine,\n// which validates it, publishes the MQTT downlink and answers the HTTP request.\nconst body = msg.payload;\nmsg.payload = body !== null && typeof body === 'object' && !Array.isArray(body) ? body : {};\nmsg.topic = 'internal/command';\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 420,
+        "wires": [
+            [
+                "state-engine"
+            ]
+        ]
+    },
+    {
+        "id": "http-response",
+        "type": "http response",
+        "z": "iot55-flow",
+        "name": "HTTP response",
+        "statusCode": "",
+        "headers": {},
+        "x": 900,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "catch-errors",
+        "type": "catch",
+        "z": "iot55-flow",
+        "name": "Catch errors",
+        "scope": null,
+        "uncaught": false,
+        "x": 150,
+        "y": 480,
+        "wires": [
+            [
+                "debug-errors"
+            ]
+        ]
+    },
+    {
+        "id": "debug-errors",
+        "type": "debug",
+        "z": "iot55-flow",
+        "name": "Errors",
+        "active": true,
+        "tosidebar": true,
+        "console": true,
+        "complete": "error",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 380,
+        "y": 480,
+        "wires": []
+    }
 ]
