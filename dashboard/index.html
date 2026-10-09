@@ -3,368 +3,258 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>IoT 55 Smart Retail</title>
+  <title>IoT 55 Energy Monitor</title>
   <style>
     :root {
-      --bg: #edf2f5;
-      --panel: #ffffff;
-      --panel-alt: #f5f7f9;
-      --line: #d7dee4;
-      --text: #17212b;
-      --muted: #64717c;
-      --ok: #2b8a5b;
-      --warn: #c65a2f;
-      --blue: #2d6cdf;
-      --shadow: 0 2px 8px rgba(23,33,43,.08);
+      --bg: #eef2f5; --panel: #ffffff; --line: #d7dee4; --text: #17212b; --muted: #5f6c77;
+      --ok: #23845a; --ok-bg: #e6f6ee; --warn: #b45309; --warn-bg: #fff4e0;
+      --bad: #b42318; --bad-bg: #fdecea; --blue: #2d6cdf; --blue-bg: #e8f0fd;
+      --shadow: 0 1px 3px rgba(23,33,43,.08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #11161b; --panel: #1a2128; --line: #2c353e; --text: #e6edf3; --muted: #93a1ad;
+        --ok: #4cc38a; --ok-bg: #16302446; --warn: #f0a646; --warn-bg: #3a2a1046;
+        --bad: #f47067; --bad-bg: #3d1a1a; --blue: #6ea4ff; --blue-bg: #1b2a44; --shadow: none;
+      }
     }
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    main {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 24px 20px 40px;
-    }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 16px;
-      margin-bottom: 18px;
-    }
-    h1 { margin: 0; font-size: 24px; }
+    body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 22px; }
+    h2 { margin: 0 0 10px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
     .muted { color: var(--muted); font-size: 13px; }
-    .status-pill {
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: #dfeaf8;
-      color: var(--blue);
-      border: 1px solid #bfd0ef;
-    }
-    .status-pill.offline {
-      background: #fbe8df;
-      color: var(--warn);
-      border-color: #f0c2aa;
-    }
-    .status-pill.online {
-      background: #eaf9f1;
-      color: var(--ok);
-      border-color: #bfe7d0;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(180px, 1fr));
-      gap: 12px;
-    }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 16px;
-      box-shadow: var(--shadow);
-    }
-    .panel h3 {
-      margin: 0 0 12px;
-      font-size: 12px;
-      letter-spacing: .08em;
-      color: var(--muted);
-      text-transform: uppercase;
-      font-weight: 700;
-    }
-    .value {
-      font-size: clamp(24px, 3vw, 32px);
-      font-weight: 800;
-      line-height: 1.2;
-      margin-top: 8px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .panel.chart-panel {
-      padding: 14px 16px 8px;
-      margin-top: 14px;
-    }
-    .chart-box {
-      width: 100%;
-      height: 180px;
-      border-radius: 8px;
-      background: linear-gradient(180deg, #f8fafb, #eef2f5);
-      border: 1px solid var(--line);
-      overflow: hidden;
-    }
-    .chart-box svg { display:block; width:100%; height:100%; }
-    .toolbar {
-      margin-top: 18px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-    }
-    .control-group {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 12px;
-      box-shadow: var(--shadow);
-      flex: 1;
-    }
-    .control-group input {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px 12px;
-      min-width: 120px;
-      font-size: 14px;
-      background: #fafcfd;
-    }
-    button {
-      border: 1px solid #bfd0ef;
-      background: #edf4ff;
-      color: #183d7a;
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: transform .08s ease, filter .08s ease;
-    }
-    button:hover { filter: brightness(.98); }
-    button:active { transform: translateY(1px); }
-    .primary { background: #2d6cdf; color: white; border-color: #2d6cdf; }
-    .danger { background: #fff0ee; color: #b14a2d; border-color: #efb5a5; }
-    .success { background: #eafaf2; color: var(--ok); border-color: #bfe7d0; }
-    .warning { background: #fff6e9; color: #a25e11; border-color: #f0d99d; }
-    .events {
-      margin-top: 18px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      box-shadow: var(--shadow);
-      padding: 16px;
-    }
-    .events-list {
-      margin: 0;
-      padding-left: 18px;
-      max-height: 220px;
-      overflow: auto;
-      color: var(--text);
-    }
-    .events-list li {
-      margin-bottom: 8px;
-      font-size: 13px;
-      line-height: 1.4;
-    }
-    .empty { color: var(--muted); font-size: 14px; }
-    .ok { color: var(--ok); }
-    .alert { color: var(--warn); }
-    @media (max-width: 800px) {
-      .grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
-      header { flex-direction: column; align-items: flex-start; }
-    }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); }
+    .pill.ok { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+    .pill.bad { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+    .pill.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+    .alarm { display: none; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; font-weight: 600; }
+    .alarm.show { display: flex; }
+    .alarm.acked { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow); min-width: 0; }
+    .value { font-size: 26px; font-weight: 800; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sub { margin-top: 4px; color: var(--muted); font-size: 12px; min-height: 16px; }
+    .value.ok { color: var(--ok); } .value.bad { color: var(--bad); } .value.warn { color: var(--warn); }
+    .row { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-top: 12px; }
+    svg { display: block; width: 100%; height: 180px; }
+    .controls { display: flex; flex-direction: column; gap: 10px; }
+    .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+    button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; padding: 9px 12px; font-weight: 700; cursor: pointer; font-size: 13px; }
+    button:hover { border-color: var(--blue); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button.on { background: var(--ok-bg); color: var(--ok); }
+    button.off { background: var(--bad-bg); color: var(--bad); }
+    button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+    input { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; width: 110px; font-size: 14px; background: var(--panel); color: var(--text); }
+    label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+    .toast { min-height: 18px; font-size: 13px; color: var(--muted); }
+    .toast.err { color: var(--bad); }
+    .events { margin-top: 12px; }
+    .events-head { display: flex; justify-content: space-between; align-items: center; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    .sev-WARNING { color: var(--warn); font-weight: 700; } .sev-ERROR, .sev-CRITICAL { color: var(--bad); font-weight: 700; }
+    .sev-DEBUG { color: var(--muted); }
+    .table-wrap { max-height: 320px; overflow: auto; }
+    @media (max-width: 860px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .row { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <div>
-        <h1>IoT 55 | Giám sát điện năng</h1>
-        <div class="muted">Smart Retail Power Automation · device01</div>
-      </div>
-      <div id="connection" class="status-pill offline">Offline</div>
-    </header>
-
-    <section class="grid">
-      <div class="panel">
-        <h3>Current signal</h3>
-        <div class="value" id="current">-</div>
-      </div>
-      <div class="panel">
-        <h3>Presence</h3>
-        <div class="value" id="presence">-</div>
-      </div>
-      <div class="panel">
-        <h3>Store</h3>
-        <div class="value" id="store">-</div>
-      </div>
-      <div class="panel">
-        <h3>Relay</h3>
-        <div class="value" id="relay">-</div>
-      </div>
-      <div class="panel">
-        <h3>Mode</h3>
-        <div class="value" id="mode">-</div>
-      </div>
-      <div class="panel">
-        <h3>System state</h3>
-        <div class="value" id="state">-</div>
-      </div>
-      <div class="panel">
-        <h3>Threshold</h3>
-        <div class="value" id="threshold">-</div>
-      </div>
-      <div class="panel">
-        <h3>Last telemetry</h3>
-        <div class="value" id="last">-</div>
-      </div>
-    </section>
-
-    <div class="panel chart-panel">
-      <h3>Current history (last 20 readings)</h3>
-      <div class="chart-box"><svg id="chart" viewBox="0 0 700 180" preserveAspectRatio="none"></svg></div>
+<main>
+  <header>
+    <div>
+      <h1>IoT 55 · Giám sát điện năng</h1>
+      <div class="muted">device01 · Sensor → ESP32 → MQTT → Node-RED → Dashboard → MQTT → Relay</div>
     </div>
-
-    <div class="toolbar">
-      <div class="control-group">
-        <button class="success" onclick="command('ON')">Relay ON</button>
-        <button class="danger" onclick="command('OFF')">Relay OFF</button>
-        <button class="primary" onclick="command('AUTO')">AUTO</button>
-        <button class="warning" onclick="command('OVERRIDE')">OVERRIDE</button>
-        <button onclick="command('CLEAR_OVERRIDE')">Clear override</button>
-      </div>
-      <div class="control-group">
-        <input id="thresholdInput" type="number" min="1" step="10" placeholder="700" aria-label="Threshold" />
-        <button class="primary" onclick="setThreshold()">Set threshold</button>
-      </div>
+    <div class="pills">
+      <span id="apiPill" class="pill">API ?</span>
+      <span id="devicePill" class="pill">Device ?</span>
     </div>
+  </header>
 
-    <section class="events">
-      <h3>Latest events</h3>
-      <ul id="eventsList" class="events-list"><li class="empty">No events</li></ul>
-    </section>
-  </main>
+  <div id="alarm" class="alarm" role="alert">
+    <span id="alarmText">Dòng điện bất thường</span>
+    <button id="ackBtn" class="off" onclick="send('ACK_ALARM')">Acknowledge alert</button>
+  </div>
 
-  <script>
-    const $ = (id) => document.getElementById(id);
+  <section class="grid">
+    <div class="panel"><h2>Dòng điện</h2><div class="value" id="current">-</div><div class="sub" id="currentSub"></div></div>
+    <div class="panel"><h2>Ngưỡng</h2><div class="value" id="threshold">-</div><div class="sub" id="thresholdSub"></div></div>
+    <div class="panel"><h2>Hiện diện</h2><div class="value" id="presence">-</div><div class="sub">PIR (giữ trạng thái sau chuyển động)</div></div>
+    <div class="panel"><h2>Cửa hàng</h2><div class="value" id="store">-</div><div class="sub" id="storeSub"></div></div>
+    <div class="panel"><h2>Relay / tải</h2><div class="value" id="relay">-</div><div class="sub" id="relaySub"></div></div>
+    <div class="panel"><h2>Chế độ</h2><div class="value" id="mode">-</div><div class="sub" id="modeSub"></div></div>
+    <div class="panel"><h2>Trạng thái hệ thống</h2><div class="value" id="state">-</div><div class="sub" id="stateSub"></div></div>
+    <div class="panel"><h2>Sự kiện mới nhất</h2><div class="value" id="lastEvent" style="font-size:18px">-</div><div class="sub" id="lastEventSub"></div></div>
+  </section>
 
-    function formatTime(value) {
-      if (!value) return '-';
-      const d = new Date(value);
-      return Number.isNaN(d.getTime()) ? '-' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  <section class="row">
+    <div class="panel">
+      <h2>Lịch sử dòng điện (ADC, 60 mẫu gần nhất) · đường đứt = ngưỡng</h2>
+      <svg id="chart" viewBox="0 0 700 180" preserveAspectRatio="none" aria-label="Current history"></svg>
+    </div>
+    <div class="panel controls">
+      <h2>Điều khiển từ xa</h2>
+      <div><label>Relay</label><div class="btns">
+        <button class="on" data-needs-device onclick="send('RELAY_ON')">Relay ON</button>
+        <button class="off" data-needs-device onclick="send('RELAY_OFF')">Relay OFF</button></div></div>
+      <div><label>Tự động hoá</label><div class="btns">
+        <button onclick="send('MODE_AUTO')">AUTO</button>
+        <button onclick="send('MODE_MANUAL')">MANUAL</button></div></div>
+      <div><label>Manual override</label><div class="btns">
+        <button data-needs-device onclick="send('OVERRIDE_ON')">Override ON</button>
+        <button data-needs-device onclick="send('OVERRIDE_OFF')">Override OFF</button></div></div>
+      <div><label for="thresholdInput">Ngưỡng (ADC 1..4095)</label><div class="btns">
+        <input id="thresholdInput" type="number" min="1" max="4095" step="1">
+        <button class="primary" onclick="setThreshold()">Set</button></div></div>
+      <div id="toast" class="toast" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section class="panel events">
+    <div class="events-head">
+      <h2>Event log</h2>
+      <label style="margin:0"><input id="showDebug" type="checkbox" style="width:auto"> hiện STATE_CHANGED</label>
+    </div>
+    <div class="table-wrap">
+      <table><thead><tr><th>Thời gian</th><th>Nguồn</th><th>Sự kiện</th><th>Mức</th><th>Lý do</th><th>Dòng</th></tr></thead>
+      <tbody id="events"><tr><td colspan="6" class="muted">Chưa có sự kiện</td></tr></tbody></table>
+    </div>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const time = (ms) => (ms ? new Date(ms).toLocaleTimeString('vi-VN') : '-');
+  let last = null;
+  let editingThreshold = false;
+
+  function set(id, text, tone) {
+    const el = $(id);
+    el.textContent = text;
+    if (tone !== undefined) el.className = 'value' + (tone ? ' ' + tone : '');
+  }
+
+  function pill(id, text, tone) {
+    $(id).textContent = text;
+    $(id).className = 'pill ' + tone;
+  }
+
+  function render(s) {
+    last = s;
+    const online = Boolean(s.online);
+    pill('devicePill', online ? 'Device online' : 'Device offline', online ? 'ok' : 'bad');
+    document.querySelectorAll('[data-needs-device]').forEach((b) => { b.disabled = !online; });
+
+    const amps = s.currentA != null ? s.currentA.toFixed(2) + ' A' : '-';
+    set('current', amps, s.alarm && s.alarm.active ? 'bad' : '');
+    $('currentSub').textContent = 'ADC ' + (s.currentSignal ?? '-') + ' (mô phỏng, 4095 = 20 A)';
+    set('threshold', String(s.threshold ?? '-'));
+    $('thresholdSub').textContent = s.thresholdA != null ? '≈ ' + s.thresholdA.toFixed(2) + ' A' : '';
+    if (!editingThreshold) $('thresholdInput').value = s.threshold ?? '';
+
+    set('presence', s.presence ? 'PRESENT' : 'NONE', s.presence ? 'ok' : '');
+    set('store', s.storeStatus || '-', s.storeStatus === 'CLOSED' ? 'warn' : 'ok');
+    const source = s.config ? s.config.storeSource : '';
+    $('storeSub').textContent = 'nguồn: ' + source + ' · lịch: ' + (s.scheduleStatus || '-') + ' · công tắc: ' + (s.storeSwitch || '-');
+    set('relay', s.relay == null ? '-' : (s.relay ? 'ON' : 'OFF'), s.relay ? 'ok' : '');
+    $('relaySub').textContent = s.relayChangedBy ? 'đổi bởi ' + s.relayChangedBy : '';
+
+    const manual = s.mode !== 'AUTO' || s.override;
+    set('mode', s.override ? 'OVERRIDE' : (s.mode || '-'), manual ? 'warn' : 'ok');
+    $('modeSub').textContent = manual ? 'tự động hoá đang tạm dừng' : 'tự động hoá đang chạy';
+
+    const tone = { NORMAL: 'ok', OCCUPIED: 'ok', AFTER_HOURS: 'warn', AUTO_SHUTDOWN: '', MANUAL_OVERRIDE: 'warn' }[s.systemState] ?? 'bad';
+    set('state', s.systemState || '-', tone);
+    $('stateSub').textContent = s.countdownMs != null
+      ? 'tự tắt sau ' + Math.ceil(s.countdownMs / 1000) + ' s'
+      : 'từ ' + time(s.stateSince) + ' · telemetry ' + time(s.lastTelemetry);
+
+    const alarm = s.alarm || {};
+    $('alarm').className = 'alarm' + (alarm.active ? ' show' : '') + (alarm.acknowledged ? ' acked' : '');
+    $('alarmText').textContent = alarm.acknowledged
+      ? 'Dòng bất thường (đã xác nhận lúc ' + time(alarm.ackAt) + ') - chờ dòng trở về bình thường'
+      : 'DÒNG ĐIỆN BẤT THƯỜNG từ ' + time(alarm.since) + ' · đỉnh ADC ' + (alarm.peakSignal ?? '-');
+    $('ackBtn').disabled = Boolean(alarm.acknowledged);
+
+    renderEvents(s.events || []);
+    renderChart(s.history || [], s.threshold);
+  }
+
+  function renderEvents(events) {
+    const showDebug = $('showDebug').checked;
+    const rows = events.filter((e) => showDebug || e.severity !== 'DEBUG').slice(0, 40);
+    const latest = events.find((e) => e.severity !== 'DEBUG');
+    $('lastEvent').textContent = latest ? latest.event_type : '-';
+    $('lastEventSub').textContent = latest ? time(latest.timestamp_ms) + ' · ' + (latest.reason || '') : '';
+    $('events').innerHTML = rows.length ? rows.map((e) => `<tr>
+        <td>${esc(time(e.timestamp_ms))}</td><td>${esc(e.origin)}</td><td>${esc(e.event_type)}</td>
+        <td class="sev-${esc(e.severity)}">${esc(e.severity)}</td><td>${esc(e.reason)}${e.detail ? ' · ' + esc(e.detail) : ''}</td>
+        <td>${e.current_a != null ? esc(Number(e.current_a).toFixed(2)) + ' A' : ''}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">Chưa có sự kiện</td></tr>';
+  }
+
+  function renderChart(history, threshold) {
+    const values = history.map((h) => Number(h.signal)).filter(Number.isFinite);
+    const W = 700, H = 180, P = 12;
+    const max = Math.max(4095 / 2, threshold * 1.3 || 0, ...values);
+    const y = (v) => H - P - (v / max) * (H - 2 * P);
+    const x = (i) => P + (values.length > 1 ? i * (W - 2 * P) / (values.length - 1) : 0);
+    const pts = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+    const ty = y(threshold || 0).toFixed(1);
+    $('chart').innerHTML =
+      `<line x1="${P}" x2="${W - P}" y1="${ty}" y2="${ty}" stroke="var(--bad)" stroke-dasharray="6 5" stroke-width="1.5"/>` +
+      (values.length ? `<polyline fill="none" stroke="var(--blue)" stroke-width="2.5" stroke-linejoin="round" points="${pts}"/>` : '');
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/state', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      pill('apiPill', 'Node-RED OK', 'ok');
+      render(await res.json());
+    } catch (err) {
+      pill('apiPill', 'Node-RED unreachable', 'bad');
+      pill('devicePill', 'Device ?', 'warn');
     }
+  }
 
-    function renderHistory(history) {
-      const values = (history || []).map(item => Number(item.value ?? 0)).filter(v => Number.isFinite(v));
-      const safe = values.length ? values : [0];
-      const max = Math.max(...safe, 1);
-      const min = Math.min(...safe, 0);
-      const svg = $('chart');
-      if (!svg) return;
-
-      const width = 700;
-      const height = 180;
-      const pad = 18;
-      const step = values.length > 1 ? (width - pad * 2) / (values.length - 1) : 0;
-      const points = values.map((v, idx) => {
-        const x = pad + idx * step;
-        const y = height - pad - ((v - min) / Math.max(max - min, 1)) * (height - pad * 2);
-        return `${x},${y}`;
-      }).join(' ');
-
-      svg.innerHTML = `
-        <defs>
-          <linearGradient id="curveFill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stop-color="#6ea4ff" stop-opacity="0.35"/>
-            <stop offset="100%" stop-color="#6ea4ff" stop-opacity="0.02"/>
-          </linearGradient>
-        </defs>
-        <path d="M 18 162 L ${points.split(' ').join(' L ')} L 682 162 Z" fill="url(#curveFill)" opacity="0.9"></path>
-        <polyline fill="none" stroke="#2d6cdf" stroke-width="3" points="${points}" stroke-linecap="round" stroke-linejoin="round"></polyline>
-      `;
-    }
-
-    function renderEvents(events) {
-      const list = $('eventsList');
-      if (!list) return;
-      const items = (events || []).slice(0, 10);
-      if (!items.length) {
-        list.innerHTML = '<li class="empty">No events</li>';
-        return;
-      }
-      list.innerHTML = items.map(item => {
-        const stamp = formatTime(item.timestamp_ms);
-        const type = item.event_type || item.type || 'EVENT';
-        const desc = item.description || item.detail || 'Event';
-        return `<li><strong>${stamp}</strong> · ${type} · ${desc}</li>`;
-      }).join('');
-    }
-
-    async function refresh() {
-      try {
-        const response = await fetch('/api/state');
-        if (!response.ok) throw new Error('API error');
-        const s = await response.json();
-        const online = Boolean(s.online);
-        const conn = $('connection');
-        conn.textContent = online ? 'Online' : 'Offline';
-        conn.className = online ? 'status-pill online' : 'status-pill offline';
-
-        $('current').textContent = s.currentSignal ?? '-';
-        $('presence').textContent = s.presence ? 'PRESENT' : 'NONE';
-        $('store').textContent = s.storeStatus || '-';
-        $('relay').textContent = s.relay ? 'ON' : 'OFF';
-        $('mode').textContent = s.override ? 'OVERRIDE' : (s.mode || '-');
-        $('state').textContent = s.systemState || '-';
-        $('threshold').textContent = s.threshold ?? '-';
-        $('last').textContent = formatTime(s.lastTelemetry);
-        $('thresholdInput').value = s.threshold ?? '';
-
-        const events = Array.isArray(s.events) ? s.events : [];
-        renderEvents(events);
-        renderHistory(Array.isArray(s.history) ? s.history : []);
-      } catch (error) {
-        $('connection').textContent = 'Offline';
-        $('connection').className = 'status-pill offline';
-        $('current').textContent = '-';
-        $('presence').textContent = 'NONE';
-        $('store').textContent = '-';
-        $('relay').textContent = 'OFF';
-        $('mode').textContent = '-';
-        $('state').textContent = 'OFFLINE';
-        $('threshold').textContent = '-';
-        $('last').textContent = '-';
-        $('eventsList').innerHTML = '<li class="empty">No events</li>';
-      }
-    }
-
-    async function command(value) {
-      try {
-        await fetch('/api/command', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ command: value })
-        });
-      } catch (error) {
-        // no-op, UI will re-render on next refresh
-      }
-      setTimeout(refresh, 300);
-    }
-
-    async function setThreshold() {
-      const value = Number($('thresholdInput').value);
-      if (!Number.isFinite(value) || value <= 0) {
-        alert('Threshold must be a positive number.');
-        return;
-      }
-      await fetch('/api/command', {
+  async function send(command, value) {
+    const toast = $('toast');
+    toast.className = 'toast';
+    toast.textContent = 'Đang gửi ' + command + '...';
+    try {
+      const res = await fetch('/api/command', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ command: 'SET_THRESHOLD', value })
+        body: JSON.stringify(value === undefined ? { command } : { command, value })
       });
-      setTimeout(refresh, 300);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || 'HTTP ' + res.status);
+      toast.textContent = command + ' đã gửi xuống thiết bị (' + time(Date.now()) + ')';
+    } catch (err) {
+      toast.className = 'toast err';
+      toast.textContent = command + ' bị từ chối: ' + err.message;
     }
+    setTimeout(refresh, 400);
+  }
 
-    refresh();
-    setInterval(refresh, 2000);
-  </script>
+  function setThreshold() {
+    editingThreshold = false;
+    send('SET_THRESHOLD', Number($('thresholdInput').value));
+  }
+
+  $('thresholdInput').addEventListener('focus', () => { editingThreshold = true; });
+  $('thresholdInput').addEventListener('blur', () => { setTimeout(() => { editingThreshold = false; }, 300); });
+  $('showDebug').addEventListener('change', () => last && renderEvents(last.events || []));
+  refresh();
+  setInterval(refresh, 1000);
+</script>
 </body>
 </html>
