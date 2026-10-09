@@ -1,0 +1,16 @@
+{
+  "name": "iot55-energy-monitoring",
+  "version": "2.0.0",
+  "private": true,
+  "description": "IoT Project 55 - smart energy monitoring and automatic power shutdown",
+  "scripts": {
+    "test": "node --test tests/state-engine.test.js tests/config.test.js",
+    "build": "node scripts/build-flows.js && node scripts/sync-wokwi.js",
+    "e2e": "node scripts/e2e.js",
+    "sim": "node scripts/device-sim.js"
+  },
+  "devDependencies": {
+    "mqtt": "^5.10.1"
+  },
+  "license": "MIT"
+}

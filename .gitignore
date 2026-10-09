@@ -24,3 +24,23 @@ dist/
 *.map
 *.log
 logs/
+
+# Firmware credentials (copy include/config.example.h)
+firmware/esp32/include/config.h
+simulation/wokwi/.pio/
+
+# Node-RED runtime data (instance secret, editor prefs, persisted context)
+middleware/node-red/.config.*.json
+middleware/node-red/.config.*.json.backup
+middleware/node-red/flows_cred.json
+middleware/node-red/.flows*.json.backup
+middleware/node-red/context/
+middleware/node-red/lib/
+middleware/node-red/node_modules/
+middleware/node-red/.npm/
+
+# Mosquitto password file
+middleware/mosquitto/passwd
+
+# Machine-specific editor config
+.vscode/c_cpp_properties.json
