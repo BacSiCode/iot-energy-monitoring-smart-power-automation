@@ -1,147 +1,52 @@
-# State Machine Design
-## IoT Project #55 — Energy Monitoring & Smart Power Automation
+# State machine — IoT 55 (bản triển khai)
 
-**Document:** `docs/state-machine/06-state-machine.md`
-**Version:** 1.0
-**Phase:** Week 1 — Architecture
-**Date:** 2026-09-09
+**Vị trí:** `updateSystemState()` trong [middleware/node-red/src/state-engine.js](../../middleware/node-red/src/state-engine.js).
+**Kiểm thử:** [tests/state-engine.test.js](../../tests/state-engine.test.js) (TEST-01…12) và `npm run e2e`.
 
----
+## 1. Nguyên tắc
+- Node-RED là nơi quyết định trạng thái hệ thống; ESP32 giữ trạng thái thiết bị (relay, mode, override, alarm cục bộ) và báo lên qua telemetry.
+- State được **suy ra theo thứ tự ưu tiên** sau mỗi input (telemetry, status, relay/state, tick 5 s, lệnh). Không có if/else rải rác: mọi rule chạy trong `evaluate()`, rồi FSM chọn đúng một state.
+- Mỗi lần đổi state → event `STATE_CHANGED` (`reason = "FROM->TO"`) và `system/state` (retained).
 
-## 1. State Machine Overview
+## 2. Các state (theo thứ tự ưu tiên)
 
-The system uses a **Finite State Machine (FSM)** to model system behaviour.
-The FSM is maintained in **Node-RED** (authoritative state) and mirrored to the
-ESP32 via the `cmd/mode` topic.
+| # | State | Điều kiện | Ý nghĩa | Automation |
+|---|---|---|---|---|
+| 1 | `OFFLINE` | chưa nhận tin / LWT / không có tin > `DEVICE_TIMEOUT_SECONDS` | mất kết nối thiết bị | treo (đếm ngược bị huỷ, lệnh relay trả 503) |
+| 2 | `FAULT` | đã gửi lệnh relay nhưng không có `relay/state` khớp sau 10 s | relay/thiết bị không phản hồi | rule vẫn chạy, cần kiểm tra |
+| 3 | `ABNORMAL_CURRENT` | `current_signal > threshold` (nhả khi `< threshold − 30`) | quá dòng | cảnh báo; CUTOFF nếu cấu hình |
+| 4 | `MANUAL_OVERRIDE` | `override_active` hoặc `mode = MANUAL` | người vận hành nắm quyền | rule 1 treo |
+| 5 | `OCCUPIED` | store CLOSED ∧ presence | còn người sau giờ | rule 2: không tắt |
+| 6 | `AUTO_SHUTDOWN` | store CLOSED ∧ relay OFF do rule 1/fallback | đã tự tắt | chờ mở cửa |
+| 7 | `AFTER_HOURS` | store CLOSED | sau giờ, đang theo dõi/đếm ngược | rule 1 đang chạy |
+| 8 | `NORMAL` | còn lại | giờ mở cửa | bình thường |
 
-**Design principle:** Keep it simple. Only states that drive different behaviour
-are included. No unnecessary complexity.
+## 3. Bảng chuyển trạng thái
 
----
+| State hiện tại | Trigger | Condition | Action | Next state |
+|---|---|---|---|---|
+| OFFLINE | `status{online:true}` hoặc telemetry hợp lệ | — | event `DEVICE_ONLINE` | theo ưu tiên (thường NORMAL) |
+| NORMAL | telemetry `store_status=CLOSED` (hoặc lịch) | — | event `STORE_CLOSED`, bắt đầu đếm ngược nếu đủ điều kiện rule 1 | AFTER_HOURS / OCCUPIED |
+| AFTER_HOURS | telemetry / tick | không người ∧ relay ON ∧ AUTO ∧ ¬override, kéo dài ≥ delay | `cmd/relay OFF source=AUTO_RULE1`, event `AUTO_SHUTDOWN` | AUTO_SHUTDOWN (khi `relay/state` = OFF) |
+| AFTER_HOURS | telemetry presence = true | đang đếm ngược | huỷ đếm ngược, event `SHUTDOWN_CANCELLED` | OCCUPIED |
+| OCCUPIED | presence hết hạn (PIR hold) | store vẫn CLOSED | event `PRESENCE_CLEARED`, bắt đầu đếm ngược lại | AFTER_HOURS |
+| AUTO_SHUTDOWN | store OPEN | AUTO ∧ ¬override | `cmd/relay ON source=AUTO_RESTORE`, event `AUTO_RESTORE` | NORMAL |
+| AUTO_SHUTDOWN | presence | — | không tự bật lại (người dùng bấm ON) | OCCUPIED |
+| bất kỳ | `current_signal > threshold` | — | event `ABNORMAL_CURRENT`; CUTOFF → `cmd/relay OFF SAFETY_CUTOFF` | ABNORMAL_CURRENT |
+| ABNORMAL_CURRENT | `ACK_ALARM` | alarm chưa ACK | `cmd/alarm ACK` (tắt buzzer), event `ALERT_ACKNOWLEDGED` | ABNORMAL_CURRENT |
+| ABNORMAL_CURRENT | `current_signal < threshold − 30` | — | event `CURRENT_NORMAL` | theo ưu tiên |
+| bất kỳ | override (nút/dashboard) hoặc `MODE_MANUAL` | — | event `MANUAL_OVERRIDE` / `AUTOMATION_DISABLED` | MANUAL_OVERRIDE |
+| MANUAL_OVERRIDE | `OVERRIDE_OFF` / `MODE_AUTO` | cả hai đều tắt | event `OVERRIDE_CLEARED` / `AUTOMATION_ENABLED` | theo ưu tiên |
+| bất kỳ | tick 5 s | lệnh relay chờ phản hồi > 10 s | event `FAULT` (ERROR) | FAULT |
+| FAULT | `relay/state` | — | event `FAULT_CLEARED` | theo ưu tiên |
+| bất kỳ | LWT `online:false` hoặc tick quá timeout | — | event `DEVICE_OFFLINE` | OFFLINE |
 
-## 2. State Definitions
+## 4. Fail-safe
 
-| State | Code | Description | Relay Default | Automation |
-|-------|------|-------------|---------------|-----------|
-| **OFFLINE** | `OFFLINE` | ESP32 not connected to MQTT | — | N/A |
-| **NORMAL** | `NORMAL` | Store open, normal operation | ON | Active |
-| **AFTER_HOURS** | `AFTER_HOURS` | Store closed, checking presence | Depends | Active |
-| **OCCUPIED** | `OCCUPIED` | Store closed but presence detected | ON | Suspended |
-| **AUTO_SHUTDOWN** | `AUTO_SHUTDOWN` | Auto-shutdown executed (load OFF) | OFF | Active |
-| **ABNORMAL_CURRENT** | `ABNORMAL_CURRENT` | Current exceeds threshold | Configurable | Alert active |
-| **MANUAL_OVERRIDE** | `MANUAL_OVERRIDE` | Human has taken control | User-controlled | Suspended |
-| **FAULT** | `FAULT` | System error — fail-safe mode | OFF | Suspended |
-
----
-
-## 3. State Transition Diagram
-
-```
-                    ┌─────────┐
-                    │ OFFLINE │◄─────────────────────────────────┐
-                    └────┬────┘                                  │
-                         │ ESP32 connects + MQTT online           │ Disconnect
-                         ▼                                        │
-                    ┌─────────┐   Store closes (22:00)           │
-     ┌──────────────│  NORMAL │─────────────────────────►        │
-     │              └────┬────┘                         │        │
-     │                   │                              │        │
-     │ Current > thresh  │                              ▼        │
-     ▼                   │                        ┌────────────┐ │
-┌──────────────────┐     │                        │ AFTER_HOURS│ │
-│ ABNORMAL_CURRENT │     │                        └──────┬─────┘ │
-└──────────────────┘     │                               │       │
-     │                   │              Presence=NONE    │       │
-     │ Current OK        │              Load=ON          │       │
-     │ (auto-recover)    │              ┌────────────────┘       │
-     │                   │              │                        │
-     │                   │              ▼                        │
-     │                   │       ┌─────────────────┐            │
-     │                   │       │  AUTO_SHUTDOWN  │            │
-     │                   │       └────────┬────────┘            │
-     │                   │                │                      │
-     │                   │   Presence=PRESENT detected           │
-     │                   │                │                      │
-     │                   │       ┌────────▼────────┐            │
-     │                   │       │    OCCUPIED     │            │
-     │                   │       └────────┬────────┘            │
-     │                   │                │ Presence clears      │
-     │                   │                │ + Store still CLOSED │
-     │                   │                ▼                      │
-     │                   │       (Re-evaluate RULE 1)           │
-     │                   │                                       │
-     │            Override ACTIVE (any state)                    │
-     │                   │                                       │
-     │                   ▼                                       │
-     │         ┌────────────────────┐                           │
-     └────────►│  MANUAL_OVERRIDE   │◄──────────────────────────┤
-               └──────────┬─────────┘                           │
-                          │ Override CLEAR                       │
-                          ▼                                      │
-                  (Return to previous state)              ┌──────┴─────┐
-                                                          │    FAULT   │
-                  Any critical error → ──────────────────►└────────────┘
-```
-
----
-
-## 4. State Transitions Table
-
-| From State | Event / Condition | To State | Action |
-|-----------|------------------|----------|--------|
-| OFFLINE | MQTT connected | NORMAL or AFTER_HOURS | Restore last state |
-| NORMAL | Store closes (scheduler) | AFTER_HOURS | Evaluate RULE 1 |
-| NORMAL | Current > threshold | ABNORMAL_CURRENT | Alert, log |
-| NORMAL | Override activated | MANUAL_OVERRIDE | Suspend automation |
-| AFTER_HOURS | Presence = NONE AND Load = ON | AUTO_SHUTDOWN | Relay OFF, log event |
-| AFTER_HOURS | Presence = PRESENT | OCCUPIED | Keep relay ON |
-| AFTER_HOURS | Current > threshold | ABNORMAL_CURRENT | Alert, log |
-| AFTER_HOURS | Store opens (scheduler) | NORMAL | Resume normal |
-| OCCUPIED | Presence = NONE (timeout) AND Store CLOSED | AUTO_SHUTDOWN | Relay OFF |
-| OCCUPIED | Presence = NONE AND Store OPEN | NORMAL | Resume normal |
-| OCCUPIED | Store opens (scheduler) | NORMAL | Resume normal |
-| AUTO_SHUTDOWN | Store opens (scheduler) | NORMAL | Relay ON |
-| AUTO_SHUTDOWN | Presence = PRESENT | OCCUPIED | Keep relay OFF? or ON* |
-| ABNORMAL_CURRENT | Current ≤ threshold | Previous state | Clear alert |
-| ABNORMAL_CURRENT | Override activated | MANUAL_OVERRIDE | Suspend automation |
-| MANUAL_OVERRIDE | Override cleared | Previous state | Resume automation |
-| MANUAL_OVERRIDE | Fault detected | FAULT | Fail-safe |
-| FAULT | System reset / manual recovery | OFFLINE | Restart sequence |
-| Any | MQTT disconnect (LWT) | OFFLINE | — |
-
-> *AUTO_SHUTDOWN + Presence: By default, re-detecting presence in AUTO_SHUTDOWN state transitions to OCCUPIED (load stays OFF until manager manually turns ON or store opens).
-
----
-
-## 5. Fail-Safe Behaviour
-
-| Condition | Fail-Safe Action |
-|-----------|-----------------|
-| MQTT connection lost | Relay stays in last known state; LWT publishes OFFLINE |
-| ESP32 reboots | Relay defaults to OFF (safe) until state restored |
-| Node-RED restarts | Relay stays physical state; Node-RED re-reads retained topics |
-| FAULT state entered | Relay → OFF, alert published, manual recovery required |
-| Invalid command received | Command ignored, error logged, state unchanged |
-
----
-
-## 6. State Machine Implementation Notes
-
-### Node-RED (Authoritative)
-- State stored in a `flow.systemState` context variable
-- State published to `iot55/device01/status` on every change (retained)
-- State transitions logged as events to `iot55/device01/event`
-
-### ESP32 (Mirror)
-- Local state variable `SystemState currentState`
-- Subscribes to `iot55/device01/cmd/mode` for mode changes
-- Relay defaults to OFF on `FAULT` or `OFFLINE`
-
-### State Persistence
-- Node-RED context (`flow` scope) survives flow redeployment
-- `fileContextStorage` used for Node-RED restarts (persistent context)
-- Retained MQTT topics allow ESP32 to restore mode/override on reconnect
-
----
-
-*End of Document*
+| Tình huống | Hành vi |
+|---|---|
+| ESP32 khởi động lại | relay OFF; `cmd/mode` và `cmd/threshold` retained được áp dụng lại; override bị xoá |
+| Mất MQTT trên ESP32 > 30 s | ESP32 tự áp dụng rule 1 bằng công tắc + PIR (`changed_by=LOCAL_FALLBACK`), event được gửi khi kết nối lại |
+| Node-RED khởi động lại | trạng thái/event log lưu trong context (localfilesystem); nhận lại `status`/`relay/state` retained |
+| Lệnh sai | bị từ chối ở API (400) và ở ESP32 (`INVALID_PAYLOAD`), không đổi trạng thái |
+| Lệnh tự động khi override | ESP32 từ chối (`COMMAND_REJECTED`) — bảo vệ cả khi có race |
