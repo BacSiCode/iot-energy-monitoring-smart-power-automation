@@ -1,39 +1,35 @@
-# Kế hoạch kiểm thử IoT 55
+# Kế hoạch & kết quả kiểm thử — IoT 55
 
-Trạng thái mặc định của các kiểm thử dưới đây là `NOT VERIFIED` cho tới khi chạy trong môi trường có Mosquitto, Node-RED và thiết bị/Wokwi kết nối được.
+## Các tầng kiểm thử
 
-| ID | Kịch bản | Kỳ vọng | Bằng chứng |
+| Tầng | Lệnh | Phạm vi | Kết quả gần nhất |
 |---|---|---|---|
-| T01 | OPEN, không người, relay ON | NORMAL, telemetry cập nhật | Chưa chạy |
-| T02 | CLOSED + không người + relay ON | Node-RED gửi OFF, AUTO_SHUTDOWN | Chưa chạy |
-| T03 | CLOSED + có người | Không tự tắt, OCCUPIED | Chưa chạy |
-| T04 | current_signal > threshold | ABNORMAL_CURRENT, dashboard cảnh báo | Chưa chạy |
-| T05 | Remote OFF | Relay OFF và relay/state phản hồi | Chưa chạy |
-| T06 | Remote ON | Relay ON và relay/state phản hồi | Chưa chạy |
-| T07 | OVERRIDE | Rule tự động bị treo, điều khiển tay hoạt động | Chưa chạy |
-| T08 | MQTT disconnect/reconnect | OFFLINE rồi ONLINE, telemetry tiếp tục | Chưa chạy |
-| T09 | JSON/command không hợp lệ | Bị từ chối, INVALID_PAYLOAD, không đổi relay | Chưa chạy |
-| T10 | Device timeout | Dashboard hiển thị OFFLINE | Chưa chạy |
-| T11 | Scheduler | OPEN/CLOSED theo giờ cấu hình | Chưa chạy |
-| T12 | End-to-end | Sensor -> ESP32 -> MQTT -> Node-RED -> command -> relay -> dashboard | Chưa chạy |
+| Build firmware | `pio run` (firmware/esp32, simulation/wokwi) | biên dịch ESP32 thật + bản Wokwi | PASS, 0 warning |
+| Unit (middleware) | `npm test` | mã `state-engine.js` thật, đồng hồ giả lập | 12/12 PASS |
+| Nhất quán | `npm test` | flows.json ↔ src, sketch.ino ↔ firmware, GPIO ↔ diagram, topic downlink ↔ firmware, không commit secret | 7/7 PASS |
+| E2E (stack thật) | `docker compose up -d` + `npm run e2e` | thiết bị ảo ↔ Mosquitto ↔ Node-RED ↔ API qua nginx | 11/11 PASS — [evidence/e2e-latest.md](evidence/e2e-latest.md) |
+| Mô phỏng Wokwi | checklist W01–W08 | firmware thật trong Wokwi | cần chạy & chụp màn hình — [simulation/wokwi/README.md](../simulation/wokwi/README.md#4-checklist-xác-minh-trong-wokwi) |
 
-## Lệnh kiểm thử MQTT thủ công
+## Ma trận test bắt buộc
 
-```powershell
-mosquitto_sub -h localhost -t 'iot55/device01/#' -v
-mosquitto_pub -h localhost -t iot55/device01/telemetry -m '{"device_id":"device01","current_signal":350,"presence":false,"store_status":"CLOSED","relay":true,"mode":"AUTO"}'
-mosquitto_pub -h localhost -t iot55/device01/telemetry -m '{"device_id":"device01","current_signal":350,"presence":false,"store_status":"CLOSED","relay":false,"mode":"AUTO"}'
-mosquitto_pub -h localhost -t iot55/device01/cmd/relay -m '{"command":"OFF","source":"TEST"}'
-mosquitto_pub -h localhost -t iot55/device01/cmd/relay -m 'not-json'
-```
+| ID | Kịch bản | Kỳ vọng | Unit | E2E | Wokwi |
+|---|---|---|---|---|---|
+| TEST-01 | Hoạt động bình thường | NORMAL, không có lệnh | ✔ | ✔ | W02 |
+| TEST-02 | CLOSED + không người + tải ON | sau delay: `cmd/relay OFF AUTO_RULE1`, `AUTO_SHUTDOWN`; mở cửa → `AUTO_RESTORE` | ✔ | ✔ | W03, W04 |
+| TEST-03 | CLOSED + có người | không tắt, `OCCUPIED`, `SHUTDOWN_CANCELLED` | ✔ | ✔ | W05 |
+| TEST-04 | Quá dòng | `ABNORMAL_CURRENT` → ACK → `CURRENT_NORMAL`; CUTOFF tự ngắt | ✔ | ✔ | W06 |
+| TEST-05 | Remote relay OFF | 202, thiết bị OFF, `relay/state` xác nhận | ✔ | ✔ | W02 |
+| TEST-06 | Remote relay ON | 202, thiết bị ON | ✔ | ✔ | W02 |
+| TEST-07 | Manual override | rule 1 treo, `cmd/mode` retained | ✔ | ✔ | W07 |
+| TEST-08 | MQTT mất/khôi phục | LWT/heartbeat → OFFLINE, lệnh 503, ONLINE lại | ✔ | ✔ | W08 |
+| TEST-09 | Payload sai | `INVALID_PAYLOAD` (middleware + thiết bị), 400 ở API, trạng thái không đổi | ✔ | ✔ | — |
+| TEST-10 | E2E uplink/downlink | ngưỡng: API → MQTT → ESP32 → telemetry → API | ✔ | ✔ | W02 |
+| TEST-11 | Scheduler | `STORE_STATUS_SOURCE=SCHEDULE`, 22:00 → `STORE_CLOSED` | ✔ | — | — |
+| TEST-12 | Relay không phản hồi | `FAULT` sau 10 s, `FAULT_CLEARED` khi có phản hồi | ✔ | — | — |
 
-## Evidence cần chụp
-
-- `screenshots/wokwi/01-normal.png`
-- `screenshots/wokwi/02-auto-shutdown.png`
-- `screenshots/mqtt/01-topics.png`
+## Bằng chứng cần chụp
+Chỉ dùng ảnh chụp thật:
+- `screenshots/wokwi/01-normal.png`, `02-auto-shutdown.png`, `03-occupied.png`, `04-abnormal.png`
+- `screenshots/dashboard/01-normal.png`, `02-countdown.png`, `03-alarm.png`, `04-offline.png`
 - `screenshots/node-red/01-flow.png`
-- `screenshots/dashboard/01-status.png`
-- `screenshots/tests/01-e2e-shutdown.png`
-
-Không tạo ảnh giả. Các mục trên chỉ là danh sách bằng chứng cần bổ sung sau khi chạy thực tế.
+- `screenshots/mqtt/01-topics.png` (`docker exec iot55-mosquitto mosquitto_sub -t 'iot55/device01/#' -v`)
