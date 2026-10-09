@@ -1,46 +1,54 @@
+# IoT 55 local stack: Mosquitto (broker) + Node-RED (middleware) + Nginx (dashboard).
+# Configure with .env (copy from .env.example). Start: docker compose up -d
 services:
   mosquitto:
-    image: eclipse-mosquitto:2
+    image: eclipse-mosquitto:2.0.18
     container_name: iot55-mosquitto
     restart: unless-stopped
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "${MQTT_BROKER_PORT:-1883}:1883"
+      - "${MQTT_BROKER_WS_PORT:-9001}:9001"
     volumes:
       - ./middleware/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mosquitto-data:/mosquitto/data
-      - mosquitto-log:/mosquitto/log
 
   nodered:
-    image: nodered/node-red:latest
+    image: nodered/node-red:4.0.9
     container_name: iot55-nodered
     restart: unless-stopped
     depends_on:
       - mosquitto
     ports:
-      - "1880:1880"
+      - "${NODERED_PORT:-1880}:1880"
     environment:
-      MQTT_HOST: mosquitto
-      MQTT_PORT: 1883
       TZ: ${TZ:-Asia/Ho_Chi_Minh}
+      # Broker used by Node-RED. "mosquitto" = local container;
+      # set to broker.hivemq.com when the device runs in Wokwi (see simulation/wokwi/README.md).
+      MQTT_HOST: ${NODERED_MQTT_HOST:-mosquitto}
+      MQTT_PORT: ${NODERED_MQTT_PORT:-1883}
+      STORE_STATUS_SOURCE: ${STORE_STATUS_SOURCE:-SWITCH}
       STORE_OPEN_TIME: ${STORE_OPEN_TIME:-08:00}
       STORE_CLOSE_TIME: ${STORE_CLOSE_TIME:-22:00}
-      AUTO_SHUTDOWN_DELAY_SECONDS: ${AUTO_SHUTDOWN_DELAY_SECONDS:-60}
+      AUTO_SHUTDOWN_DELAY_SECONDS: ${AUTO_SHUTDOWN_DELAY_SECONDS:-10}
+      DEVICE_TIMEOUT_SECONDS: ${DEVICE_TIMEOUT_SECONDS:-15}
+      SAFETY_MODE: ${SAFETY_MODE:-ALERT_ONLY}
+      NODE_RED_CREDENTIAL_SECRET: ${NODE_RED_CREDENTIAL_SECRET:-}
+      NODE_RED_ADMIN_USER: ${NODE_RED_ADMIN_USER:-}
+      NODE_RED_ADMIN_PASSWORD_HASH: ${NODE_RED_ADMIN_PASSWORD_HASH:-}
     volumes:
       - ./middleware/node-red:/data
 
   dashboard:
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     container_name: iot55-dashboard
     restart: unless-stopped
     depends_on:
       - nodered
     ports:
-      - "8080:80"
+      - "${DASHBOARD_PORT:-8080}:80"
     volumes:
-      - ./dashboard:/usr/share/nginx/html:ro
+      - ./dashboard/index.html:/usr/share/nginx/html/index.html:ro
       - ./dashboard/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
 volumes:
   mosquitto-data:
-  mosquitto-log:
